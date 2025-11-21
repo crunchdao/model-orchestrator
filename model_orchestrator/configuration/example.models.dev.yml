@@ -1,0 +1,15 @@
+models:
+- id: "1"
+
+  # name of the model, can be anything
+  name: "frank"
+
+  # submission code id, it is the code used to run the model
+  # the corresponding directory must exist in the storage
+  submission_id: "1"
+
+  # which crunch this model must be run on
+  crunch_id: "iris-classifier"
+
+  # which desired state this model must be in: "RUNNING", "STOPPED"
+  desired_state: "STOPPED"

@@ -1,0 +1,23 @@
+/storage/
+docker/submission
+docker/packages
+/dist/*
+.idea
+.DS_Store
+
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.log
+*.db
+/model_orchestrator/data/orchestrator.yml
+
+.devdbrc
+
+.env
+
+/models.dev.yml
+/orchestrator.dev.db
+/orchestrator.dev.yml

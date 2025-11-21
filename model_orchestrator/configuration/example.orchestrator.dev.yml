@@ -1,0 +1,66 @@
+logging:
+  # Logging levels: 'debug', 'trace', 'info', 'warn', 'error'
+  level: debug
+
+infrastructure:
+
+  # Configure the database (only one)
+  database:
+    # Data store type, only `sqlite` available for the moment
+    type: sqlite
+
+    # Path of the .db file
+    path: "orchestrator.dev.db"
+
+  # Configure publishers
+  publishers:
+  - type: websocket
+
+    # IP address to bind to
+    address: "0.0.0.0"
+
+    # Port to bind to
+    port: 9091
+
+  # Configure a local builder and runner (only one)
+  runner:
+    type: local
+
+    # Docker (compose) network name, only if running from a docker container
+    docker-network-name: null
+
+    # Directory path format where the submission content are stored
+    submission-storage-path-format: "storage/submissions/{id}"
+
+    # Directory path format where the resource content are stored
+    resource-storage-path-format: "storage/models/{id}"
+
+# Configure the watcher
+watcher:
+
+  # Check interval, in seconds
+  interval: 10
+
+  # Configure the local yaml file model state poller (only one)
+  poller:
+    type: yaml
+
+    # File path of the file to watch
+    path: "models.dev.yml"
+
+crunches:
+- id: "iris-classifier"
+  name: "iris classifier"
+  infrastructure:
+    zone: "local"
+#  run-schedule:
+#    # for the syntax have look to https://wiki.openstreetmap.org/wiki/Key:opening_hours/specification
+#    intervals:
+#      - 'Mo-Th 00:00-11:00,16:00-00:00'
+#    timezone: 'America/New_York'
+
+# Disable the quarantine system
+can-place-in-quarantine: false
+
+# Disable fetch model information from Tournament API
+use-augmented-info: false

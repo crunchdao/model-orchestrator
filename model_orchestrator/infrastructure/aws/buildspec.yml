@@ -1,0 +1,41 @@
+version: 0.2
+
+phases:
+  pre_build:
+    commands:
+      - echo "$DOCKERFILE_CONTENT" > Dockerfile
+      - echo "Downloading submission..."
+      - aws s3 cp --recursive "s3://$S3_BUCKET_NAME/submissions/$SUBMISSION_ID/" submission/code
+      - >
+        if [ -z "$RESOURCES_ID" ]; then
+          echo "resources_id not provided. Ensuring directories exist..."
+          mkdir -p resources
+        else
+          echo "Downloading resources of model..."
+          aws s3 cp --recursive "s3://$S3_BUCKET_NAME/models/$RESOURCES_ID/" resources
+        fi
+      - ls -l submission/code
+      - echo "Connecting to Docker Hub credentials..."
+      - echo $DOCKER_TOKEN | docker login -u $DOCKER_USERNAME --password-stdin
+
+  build:
+    commands:
+      - >
+        if [ "$HARDWARE_TYPE" = "GPU" ]; then
+          echo "Building docker image with GPU"
+          docker build --build-arg BASE_IMAGE=tensorflow/tensorflow:2.14.0-gpu --build-arg HAS_GPU=True -t $IMAGE_REPO_NAME:$IMAGE_TAG -f Dockerfile .
+        else
+          echo "Building docker image with CPU"
+          docker build --build-arg BASE_IMAGE=python:3.13 -t $IMAGE_REPO_NAME:$IMAGE_TAG -f Dockerfile .
+        fi
+
+  post_build:
+    commands:
+      - echo "Authenticating to ECR..."
+      - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
+      - echo "Pushing Docker image to ECR..."
+      - docker tag $IMAGE_REPO_NAME:$IMAGE_TAG $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME:$IMAGE_TAG
+      - docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME:$IMAGE_TAG
+
+artifacts:
+  files: [ ]

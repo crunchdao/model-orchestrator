@@ -1,0 +1,15 @@
+# Python cache and compiled files
+__pycache__/
+*.py[cod]
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
+# Virtual environments
+.venv/
+.env
+
+# Other unwanted or temporary files
+.DS_Store
