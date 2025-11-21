@@ -13,3 +13,7 @@ build/
 
 # Other unwanted or temporary files
 .DS_Store
+.coverage
+storage
+model_orchestrator/storage
+*.db

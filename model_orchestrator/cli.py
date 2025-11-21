@@ -115,20 +115,9 @@ def import_(
 
     logger.info("Importing Jupyter Notebook: %s", notebook_file_path)
 
-    from crunch.api import Client
-    from crunch.api.auth import NoneAuth
-    client = Client(
-        api_base_url=dev_configuration.tournament_api_url,
-        web_base_url="",  # can be ignored
-        auth=NoneAuth(),
-    )
-
-    from crunch.convert import extract_cells
-    (
-        source_code,
-        embed_files,
-        requirements,
-    ) = extract_cells(
+    from crunch_convert.notebook import extract_from_cells
+    from crunch_convert.requirements_txt import CrunchHubWhitelist, format_files_from_imported
+    flatten = extract_from_cells(
         notebook.get("cells", []),
         print=logger.debug
     )
@@ -138,22 +127,32 @@ def import_(
     base_dir = runner_config.format_submission_storage_path(id)
     os.makedirs(base_dir, exist_ok=True)
 
-    with open(os.path.join(base_dir, "notebook.py"), "w") as fd:
+    with open(os.path.join(base_dir, "notebook.ipynb"), "w") as fd:
         fd.write(json.dumps(notebook, indent=4))
 
     with open(os.path.join(base_dir, "main.py"), "w") as fd:
-        fd.write(source_code)
+        fd.write(flatten.source_code)
 
-    for embed_file in embed_files:
+    for embed_file in flatten.embedded_files:
         file_path = os.path.join(base_dir, embed_file.path)
         os.makedirs(os.path.dirname(file_path), exist_ok=True)
 
         with open(file_path, "w") as fd:
             fd.write(embed_file.content)
 
-    requirements_txt = client.libraries.freeze_imported_requirements(requirements=requirements)
+    whitelist = CrunchHubWhitelist()
+
+    requirements_files = format_files_from_imported(
+        flatten.requirements,
+        header="extracted from a notebook",
+        whitelist=whitelist,
+    )
+    real_content = ""
+    for requirement_language, content in requirements_files.items():
+        real_content += content
+
     with open(os.path.join(base_dir, "requirements.txt"), "w") as fd:
-        fd.write(requirements_txt)
+        fd.write(real_content)
 
     logger.info("Imported to: %s", base_dir)
 
