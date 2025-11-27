@@ -1,5 +1,5 @@
 # Step 1: Base image
-ARG BASE_IMAGE=python:latest
+ARG BASE_IMAGE=python:3.13
 
 FROM $BASE_IMAGE
 RUN echo "[global]" >> /etc/pip.conf && \
