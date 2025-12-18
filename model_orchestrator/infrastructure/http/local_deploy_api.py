@@ -186,7 +186,7 @@ def create_local_deploy_api(services: LocalDeployServices) -> FastAPI:
         desired_state: DesiredState = Form(None),
         model_name: Optional[str] = Form(None),
         cruncher_name: Optional[str] = Form(None),
-        files: List[UploadFile] = File(...),
+        files: Optional[List[UploadFile]] = File(None),
     ):
 
         model_config = svc.model_state_config.fetch_config(model_id)
