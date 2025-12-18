@@ -50,7 +50,7 @@ class LocalModelRunner(Runner):
             name=f"{self.CONTAINER_PREFIX}-{model.code_submission_id}",
             detach=True,
             ports={RPC_PORT: find_free_port()},
-            remove=True,
+            #remove=True,
             network=network_name,
         )
 
