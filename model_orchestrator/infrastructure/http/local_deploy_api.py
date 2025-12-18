@@ -14,14 +14,14 @@ from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Query, Reque
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
-from model_orchestrator.configuration import AppConfig
-from model_orchestrator.infrastructure.config_watcher import ModelStateConfigYamlPolling
-from model_orchestrator.mediators.models_state_mediator import ModelsStateMediator
+from ...configuration import AppConfig
+from ...infrastructure.config_watcher import ModelStateConfigYamlPolling
+from ...mediators.models_state_mediator import ModelsStateMediator
 
 from ._types import *
-from model_orchestrator.utils.loader import import_notebook
-from model_orchestrator.utils.logging_utils import get_logger
-from model_orchestrator.utils.unique_slug import generate_unique_coolname
+from ...utils.loader import import_notebook
+from ...utils.logging_utils import get_logger
+from ...utils.unique_slug import generate_unique_coolname
 
 logger = get_logger()
 docker_client = docker.from_env()
