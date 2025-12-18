@@ -134,7 +134,7 @@ class _DockerBuild:
 
         def run():
             try:
-                self._build(submission_path, resource_path, image_name_with_tag)
+                self._build(submission_path, resource_path, image_name_with_tag, task_name)
                 self._report_status(task_name, ModelRun.BuilderStatus.SUCCESS)
             except Exception as exception:
                 logger.error(f"Build failed for {task_name}: {exception}", exc_info=exception)
@@ -170,7 +170,8 @@ class _DockerBuild:
         self,
         submission_path: str,
         resource_path: Optional[str],
-        image_name_with_tag: str
+        image_name_with_tag: str,
+        task_name: str
     ):
         with tempfile.TemporaryDirectory(prefix='model-orchestrator-') as temp_dir:
             logger.debug(f"Preparing files to {temp_dir}")
@@ -188,7 +189,7 @@ class _DockerBuild:
             else:
                 os.makedirs(resource_temp_dir, exist_ok=True)
 
-            image, _ = self._build_image(temp_dir, image_name_with_tag)
+            image, _ = self._build_image(temp_dir, image_name_with_tag, task_name)
 
         return image.id
 
@@ -224,7 +225,7 @@ class _DockerBuild:
                 self._copy(source_item, destination_item)
 
     # adapted from docker-py
-    def _build_image(self, path: str, image_name_with_tag: str):
+    def _build_image(self, path: str, image_name_with_tag: str, task_name: str):
         from docker.utils.json_stream import json_stream
 
         resp = self._client.api.build(
@@ -247,23 +248,27 @@ class _DockerBuild:
         last_event = None
         image_id = None
 
-        result_stream, internal_stream = itertools.tee(json_stream(resp))
-        for chunk in internal_stream:
-            logger.info("Building: %s", chunk)
+        log_file_path = os.path.join(tempfile.gettempdir(), f"{task_name}.log")
+        os.makedirs(os.path.dirname(log_file_path), exist_ok=True)
+        with open(log_file_path, 'w') as log_file:
+            result_stream, internal_stream = itertools.tee(json_stream(resp))
+            for chunk in internal_stream:
+                logger.debug("Building: %s", chunk)
+                log_file.write(chunk.get('stream', ''))
+                if 'error' in chunk:
+                    raise docker.errors.BuildError(chunk['error'], result_stream)
 
-            if 'error' in chunk:
-                raise docker.errors.BuildError(chunk['error'], result_stream)
+                if 'stream' in chunk:
+                    match = re.search(
+                        r'(^Successfully built |sha256:)([0-9a-f]+)$',
+                        chunk['stream']
+                    )
 
-            if 'stream' in chunk:
-                match = re.search(
-                    r'(^Successfully built |sha256:)([0-9a-f]+)$',
-                    chunk['stream']
-                )
+                    if match:
+                        image_id = match.group(2)
 
-                if match:
-                    image_id = match.group(2)
+                last_event = chunk
 
-            last_event = chunk
 
         if image_id:
             return (self._client.images.get(image_id), result_stream)

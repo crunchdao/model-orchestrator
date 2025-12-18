@@ -80,6 +80,23 @@ class SQLiteModelRunRepository(ModelRunRepository, SQLiteRepository):
                 models.append(model)
             return models
 
+    @newrelic.agent.datastore_trace("sqlite", "model_runs", "select")
+    def load_all_latest(self) -> list[ModelRun]:
+        with self._open() as db:
+            rows = db.query("""
+                SELECT * FROM model_runs as A
+                WHERE datetime(A.created_at) = (
+                    SELECT max(datetime(B.created_at)) 
+                    FROM model_runs as B 
+                    WHERE B.model_id = A.model_id
+                )
+            """)
+            models: list[ModelRun] = []
+            for row in rows:
+                model = self.build_model_run_from_row(row)
+                models.append(model)
+            return models
+
     @newrelic.agent.datastore_trace("sqlite", "model_runs", "upsert")
     def save_model(self, model: ModelRun) -> None:
         """

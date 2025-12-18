@@ -107,7 +107,7 @@ class ModelRun:
         self.failure = failure
         self.in_quarantine = in_quarantine
 
-        self.augmented_info: ModelInfo | None = None  # used to cache all information loaded from API Tournament OffChain Service
+        self.augmented_info: ModelInfo | None = None  # used to catch all information loaded from API Tournament OffChain Service
 
         if not self.code_submission_id or self.code_submission_id.strip() == "":
             raise ValueError(f"Invalid code_submission_id value: {self.code_submission_id}")

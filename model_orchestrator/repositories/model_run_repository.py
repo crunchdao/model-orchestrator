@@ -16,6 +16,13 @@ class ModelRunRepository(abc.ABC):
         pass
 
     @abc.abstractmethod
+    def load_all_latest(self) -> list[ModelRun]:
+        """
+        Loads all models runs without duplication by returning the most recent one.
+        """
+        pass
+
+    @abc.abstractmethod
     def save_model(self, model: ModelRun) -> None:
         """
         Insert or update the given model in the data source.

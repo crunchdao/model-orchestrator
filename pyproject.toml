@@ -28,6 +28,11 @@ exceptiongroup = "^1.3.0"
 opening-hours-py = "^1.1.3"
 crunch-convert = "^0.4.0"
 inquirer = "^3.4.1"
+fastapi = "^0.124.4"
+base58 = "^2.1.1"
+coolname = "^2.2.0"
+python-multipart = "^0.0.20"
+uvicorn = "^0.38.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3.4"
