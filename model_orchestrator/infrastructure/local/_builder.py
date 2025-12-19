@@ -255,6 +255,7 @@ class _DockerBuild:
             for chunk in internal_stream:
                 logger.debug("Building: %s", chunk)
                 log_file.write(chunk.get('stream', ''))
+                log_file.flush()
                 if 'error' in chunk:
                     raise docker.errors.BuildError(chunk['error'], result_stream)
 

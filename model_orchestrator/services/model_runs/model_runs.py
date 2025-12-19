@@ -205,6 +205,7 @@ class ModelRunsService:
     def get_all_models(self):
         with self.lock:
             models = self.model_runs_repository.load_all_latest()
+            self.run_service.update_models_info(models)
         return models
 
     # error reported from coordinator

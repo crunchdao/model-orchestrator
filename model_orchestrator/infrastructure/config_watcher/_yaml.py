@@ -1,5 +1,8 @@
 import os
+import threading
 from typing import Optional
+
+from ruamel.yaml import YAML
 
 from model_orchestrator.entities.model_run import ModelRun
 from ...entities import ModelInfo
@@ -25,8 +28,7 @@ class ModelStateConfigYamlPolling(ModelStateConfigPolling, AugmentedModelInfoRep
         if not self.exists():
             logger.error(f"File not found: {file_path}")
 
-        from ruamel.yaml import YAML
-        self._yaml = YAML()
+        self._write_lock = threading.Lock()
 
     def exists(self) -> bool:
         return os.path.exists(self.file_path)
@@ -35,18 +37,20 @@ class ModelStateConfigYamlPolling(ModelStateConfigPolling, AugmentedModelInfoRep
         root = None
         if self.exists():
             with open(self.file_path, 'r') as file:
-                root = self._yaml.load(file)
+                yaml = YAML()
+                root = yaml.load(file)
 
         if root is None:
             root = {}
 
         root.setdefault('models', [])
-
         return root
 
     def _write_raw_yaml(self, root: dict):
-        with open(self.file_path, 'w') as file:
-            self._yaml.dump(root, file)
+        with self._write_lock:
+            with open(self.file_path, 'w') as file:
+                yaml = YAML()
+                yaml.dump(root, file)
 
     def append(
         self,

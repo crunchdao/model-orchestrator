@@ -75,33 +75,33 @@ class LocalModelRunner(Runner):
             self._print_logs(model, container)
 
             state = ModelRun.RunnerStatus.RUNNING if container.status == 'running' else ModelRun.RunnerStatus.STOPPED
-
             # Determine if coordinator is dockerized based on environment variable
             is_coordinator_dockerized = self._docker_network_name is not None
             
             ip = "localhost"
             port = 0
 
-            if is_coordinator_dockerized:
-                # For dockerized coordinator, use internal container IP and internal port
-                network_settings = container.attrs.get('NetworkSettings', {})
-                networks = network_settings.get('Networks', {})
-                # Assuming a single network for simplicity, or iterate if multiple
-                network_name = list(networks.keys())[0] if networks else None
-                container_ip = networks.get(network_name, {}).get('IPAddress') if network_name else None
-                internal_grpc_port = int(RPC_PORT.split('/', maxsplit=1)[0]) # The internal gRPC port of the model container
+            if state == ModelRun.RunnerStatus.RUNNING:
+                if is_coordinator_dockerized:
+                    # For dockerized coordinator, use internal container IP and internal port
+                    network_settings = container.attrs.get('NetworkSettings', {})
+                    networks = network_settings.get('Networks', {})
+                    # Assuming a single network for simplicity, or iterate if multiple
+                    network_name = list(networks.keys())[0] if networks else None
+                    container_ip = networks.get(network_name, {}).get('IPAddress') if network_name else None
+                    internal_grpc_port = int(RPC_PORT.split('/', maxsplit=1)[0]) # The internal gRPC port of the model container
 
-                if container_ip:
-                    ip = container_ip
-                    port = internal_grpc_port
+                    if container_ip:
+                        ip = container_ip
+                        port = internal_grpc_port
+                    else:
+                        logger.warning(f"Could not determine IP for model {model.id}. Reporting as FAILED.")
+                        return ModelRun.RunnerStatus.FAILED, '', 0
                 else:
-                    logger.warning(f"Could not determine IP for model {model.id}. Reporting as FAILED.")
-                    return ModelRun.RunnerStatus.FAILED, '', 0
-            else:
-                # For non-dockerized coordinator, use host-mapped IP and port
-                port_bindings = container.attrs.get('HostConfig', {}).get('PortBindings', {}).get(RPC_PORT, [{}])[0]
-                ip = port_bindings.get('HostIp') or "localhost"
-                port = port_bindings.get('HostPort') or 0
+                    # For non-dockerized coordinator, use host-mapped IP and port
+                    port_bindings = container.attrs.get('HostConfig', {}).get('PortBindings', {}).get(RPC_PORT, [{}])[0]
+                    ip = port_bindings.get('HostIp') or "localhost"
+                    port = port_bindings.get('HostPort') or 0
 
             return state, ip, port
         except docker.errors.NotFound:

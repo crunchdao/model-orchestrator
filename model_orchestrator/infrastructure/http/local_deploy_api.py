@@ -62,6 +62,7 @@ async def process_uploaded_files(
         import_notebook(file_content, submission_dir)
         logger.info("Imported to: %s", submission_dir)
     else:
+        os.makedirs(submission_dir, exist_ok=True)
         for f in files:
             file_path = os.path.join(submission_dir, f.filename)
             with open(file_path, "wb") as outfile:
