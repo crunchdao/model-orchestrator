@@ -69,7 +69,7 @@ class _RunService:
             get_logger().debug(f"Model is in build phase, we do not need to stop it")
             self.cluster.models.remove(model)
 
-    def update_models_info(self, models = None):
+    def update_models_info(self, models=None):
         models = self.cluster.get_models_in_run_phase() if models is None else models
         try:
             self.latest_augmented_models_info = self.augmented_model_info_repository.loads([model.model_id for model in models])
@@ -85,8 +85,11 @@ class _RunService:
 
             prev_model_info = model.augmented_info
             model.augmented_info = model_info
-            if model.is_running() and prev_model_info != model_info:
-                self.state_subject.notify_runner_state_changed(model, model.runner_status, model.runner_status)
+            if prev_model_info != model_info:
+                self.model_runs_repository.save_model(model)
+                if model.is_running():
+                    self.state_subject.notify_runner_state_changed(model, model.runner_status, model.runner_status)
+
 
     def update_runner_states(self):
         # first pass of model runner

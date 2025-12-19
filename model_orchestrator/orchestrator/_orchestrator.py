@@ -15,7 +15,7 @@ from model_orchestrator.services.crunch_service import CrunchNotFoundError, Crun
 from model_orchestrator.services.model_runs import (ModelRunsService,
                                                     SignatureVerifier)
 from model_orchestrator.state.models_state_subject import ModelsStateSubject
-from model_orchestrator.utils.logging_utils import get_logger
+from model_orchestrator.utils.logging_utils import get_logger, attach_uvicorn_to_my_logger
 
 from ..configuration import AppConfig
 from ..infrastructure import ThreadPoller
@@ -208,7 +208,7 @@ class Orchestrator:
                 from ..infrastructure.http import create_local_deploy_api, LocalDeployServices
                 import uvicorn
 
-                port = 8000
+                port = 8001
                 host = "0.0.0.0"
                 logger.info(f"Start HTTP server for local deployment over {host}:{port}")
 
@@ -220,7 +220,24 @@ class Orchestrator:
                 )
                 local_deploy_api = create_local_deploy_api(local_deploy_services)
 
-                self._backgrounds.append(lambda: uvicorn.run(local_deploy_api, host=host, port=port))
+                def make_uvicorn_runner(app, host, port):
+                    config = uvicorn.Config(app, host=host, port=port, log_config=None, access_log=True)
+                    server = uvicorn.Server(config)
+
+                    def uvicorn_run():
+                        server.run()
+
+                    def uvicorn_stop():
+                        if not server.should_exit:
+                            server.should_exit = True
+                            #server.force_exit = True  # optional, fast
+
+                    return uvicorn_run, uvicorn_stop
+
+                uvicorn_run, uvicorn_stop = make_uvicorn_runner(local_deploy_api, host, port)
+                attach_uvicorn_to_my_logger()
+                self._backgrounds.append(uvicorn_run)
+                self._finishers.append(uvicorn_stop)
 
     def on_schedule_changed(self, config_changes: dict, changed_schedule_states):
         if changed_schedule_states:
@@ -355,10 +372,16 @@ class Orchestrator:
 
         for finisher in self._finishers:
             logger.debug("-- Finishing %s...", finisher.__name__)
-            await finisher()
+            if asyncio.iscoroutinefunction(finisher):
+                await finisher()
+            else:
+                finisher()
         logger.debug("-- Processed finishers")
+
 
         for thread in self._daemons:
             logger.debug("Waiting for thread %s...", thread)
             thread.join()
         logger.debug("-- Processed threads")
+
+

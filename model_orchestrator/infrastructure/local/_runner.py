@@ -43,14 +43,23 @@ class LocalModelRunner(Runner):
 
     def run(self, model, crunch):
         network_name = self._docker_network_name
-        get_logger().info("Running model %s on local Docker runner with network %s", model.id, network_name)
+        get_logger().debug("Running model %s on local Docker runner with network %s", model.id, network_name)
+        container_name = f"{self.CONTAINER_PREFIX}-{model.code_submission_id}"
+
+        try:
+            existing_container = self._docker_client.containers.get(container_name)
+            get_logger().debug("Container %s already exists, stopping and removing it.", container_name)
+            existing_container.stop(timeout=0)
+            existing_container.remove()
+        except docker.errors.NotFound:
+            get_logger().debug("No existing container with name %s found, proceeding to create a new one.", container_name)
 
         container = self._docker_client.containers.run(
             image=model.docker_image,
-            name=f"{self.CONTAINER_PREFIX}-{model.code_submission_id}",
+            name=container_name,
             detach=True,
             ports={RPC_PORT: find_free_port()},
-            #remove=True,
+            # remove=True,
             network=network_name,
         )
 
@@ -106,7 +115,7 @@ class LocalModelRunner(Runner):
 
     def stop(self, model):
         container = self._docker_client.containers.get(model.runner_job_id)
-        return container.stop()
+        return container.stop(timeout=0)
 
     def _print_logs(self, model: ModelRun, container: "docker.models.containers.Container"):
         since = self._last_log_timestamp_per_container_id.get(container.id)
