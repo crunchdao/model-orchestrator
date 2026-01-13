@@ -202,6 +202,12 @@ class ModelRunsService:
             running_models = self.cluster.get_running_models().copy()
         return running_models
 
+    def get_all_models(self):
+        with self.lock:
+            models = self.model_runs_repository.load_all_latest()
+            self.run_service.update_models_info(models)
+        return models
+
     # error reported from coordinator
     def report_model_runner_failure(self, failure_code, model_id, ip):
         with self.failures_reported_lock:

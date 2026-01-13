@@ -1,7 +1,12 @@
 import os
+import threading
 from typing import Optional
 
+from ruamel.yaml import YAML
+
 from model_orchestrator.entities.model_run import ModelRun
+from ...entities import ModelInfo
+from ...repositories.augmented_model_info_repository import AugmentedModelInfoRepository
 
 from ...utils.logging_utils import get_logger
 from ._base import ModelStateConfig, ModelStateConfigPolling
@@ -9,7 +14,7 @@ from ._base import ModelStateConfig, ModelStateConfigPolling
 logger = get_logger()
 
 
-class ModelStateConfigYamlPolling(ModelStateConfigPolling):
+class ModelStateConfigYamlPolling(ModelStateConfigPolling, AugmentedModelInfoRepository):
 
     def __init__(
         self,
@@ -23,8 +28,7 @@ class ModelStateConfigYamlPolling(ModelStateConfigPolling):
         if not self.exists():
             logger.error(f"File not found: {file_path}")
 
-        from ruamel.yaml import YAML
-        self._yaml = YAML()
+        self._write_lock = threading.Lock()
 
     def exists(self) -> bool:
         return os.path.exists(self.file_path)
@@ -33,35 +37,50 @@ class ModelStateConfigYamlPolling(ModelStateConfigPolling):
         root = None
         if self.exists():
             with open(self.file_path, 'r') as file:
-                root = self._yaml.load(file)
+                yaml = YAML()
+                root = yaml.load(file)
 
         if root is None:
             root = {}
 
         root.setdefault('models', [])
-
         return root
 
     def _write_raw_yaml(self, root: dict):
-        with open(self.file_path, 'w') as file:
-            self._yaml.dump(root, file)
+        with self._write_lock:
+            with open(self.file_path, 'w') as file:
+                yaml = YAML()
+                yaml.dump(root, file)
 
     def append(
         self,
         id: str,
-        name: str,
         submission_id: str,
         crunch_id: str,
         desired_state=ModelRun.DesiredStatus.RUNNING,
+        *,
+        cruncher_id: Optional[str] = None,
+        model_name: Optional[str] = None,
+        cruncher_name: Optional[str] = None
     ):
         root = self.load_raw_yaml()
-        root["models"].append({
+        new_model = {
             "id": id,
-            "name": name,
             "submission_id": submission_id,
             "crunch_id": crunch_id,
             "desired_state": desired_state.value,
-        })
+        }
+
+        if model_name is not None:
+            new_model["model_name"] = model_name
+
+        if cruncher_name is not None:
+            new_model["cruncher_name"] = cruncher_name
+
+        if cruncher_id is not None:
+            new_model["cruncher_id"] = cruncher_id
+
+        root["models"].append(new_model)
 
         self._write_raw_yaml(root)
 
@@ -71,6 +90,8 @@ class ModelStateConfigYamlPolling(ModelStateConfigPolling):
         *,
         submission_id: Optional[str] = None,
         desired_state: Optional[ModelRun.DesiredStatus] = None,
+        model_name: Optional[str] = None,
+        cruncher_name: Optional[str] = None
     ):
         root = self.load_raw_yaml()
 
@@ -86,6 +107,12 @@ class ModelStateConfigYamlPolling(ModelStateConfigPolling):
         if desired_state is not None:
             model["desired_state"] = desired_state.value
 
+        if model_name is not None:
+            model["model_name"] = model_name
+
+        if cruncher_name is not None:
+            model["cruncher_name"] = cruncher_name
+
         self._write_raw_yaml(root)
 
     def fetch_configs(self):
@@ -94,6 +121,26 @@ class ModelStateConfigYamlPolling(ModelStateConfigPolling):
         except Exception as e:
             logger.exception("Error monitoring file", exc_info=e)
             return None
+
+    def fetch_config(self, id: str) -> dict | None:
+        """Fetches the configuration of a model by ID."""
+        try:
+            for model in self.load_raw_yaml().get('models', []):
+                if model["id"] == id:
+                    return model
+        except Exception as e:
+            logger.exception(f"Error fetching model configuration for ID: {id}", exc_info=e)
+
+        logger.error(f"Model configuration with ID {id} not found.")
+        return None
+
+    def get_next_id(self) -> int:
+        """Calculates the next ID based on the existing IDs in the YAML."""
+        models = self.fetch_configs()
+        if not models:
+            return 1
+        max_id = max(int(model["id"]) for model in models)
+        return max_id + 1
 
     def create_models_state(self, config_entries):
         return [
@@ -111,3 +158,19 @@ class ModelStateConfigYamlPolling(ModelStateConfigPolling):
             )
             for config_entry in config_entries
         ]
+
+    def loads(self, models_id: list[str]) -> dict[str, ModelInfo]:
+        model_infos = {}
+        for model in self.fetch_configs():
+            if model["id"] in models_id:
+                model_infos[model["id"]] = ModelInfo(model.get("model_name"), model.get("cruncher_name"))
+
+        return model_infos
+
+    def get_slugs(self):
+        slugs = set()
+        models = self.fetch_configs()
+        for model in models:
+            slugs.add(f"{model.get("model_name")}-{model.get('cruncher_name')}")
+
+        return slugs

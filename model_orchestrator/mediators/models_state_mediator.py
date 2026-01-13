@@ -9,5 +9,9 @@ class ModelsStateMediator:
     def get_running_models(self) -> list[ModelRun]:
         return self.models_run_service.get_running_models()
 
+    def get_all_models(self) -> list[ModelRun]:
+        return self.models_run_service.get_all_models()
+
+
     def report_failure(self, failure_code: str, model_id: str, ip: str):
         return self.models_run_service.report_model_runner_failure(failure_code, model_id, ip)

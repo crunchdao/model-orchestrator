@@ -1,10 +1,12 @@
 import datetime
+import json
+from dataclasses import asdict
 from typing import Any, Optional
 
 import newrelic.agent
 import sqlite_utils
 
-from ....entities import Failure, ModelRun
+from ....entities import Failure, ModelRun, ModelInfo
 from ....entities.errors import deserialize_error_type, serialize_error_type
 from ....repositories.model_run_repository import ModelRunRepository
 from ....utils.logging_utils import get_logger
@@ -62,6 +64,7 @@ class SQLiteModelRunRepository(ModelRunRepository, SQLiteRepository):
             self._add_column_if_not_exists(db, 'failure_traceback', str)
             self._add_column_if_not_exists(db, 'failure_occurred_at', str)
             self._add_column_if_not_exists(db, 'in_quarantine', bool)
+            self._add_column_if_not_exists(db, 'augmented_info', str)
 
     @newrelic.agent.datastore_trace("sqlite", "model_runs", "select")
     def load_active(self) -> list[ModelRun]:
@@ -76,6 +79,23 @@ class SQLiteModelRunRepository(ModelRunRepository, SQLiteRepository):
             )
             models: list[ModelRun] = []
             for row in active_runs:
+                model = self.build_model_run_from_row(row)
+                models.append(model)
+            return models
+
+    @newrelic.agent.datastore_trace("sqlite", "model_runs", "select")
+    def load_all_latest(self) -> list[ModelRun]:
+        with self._open() as db:
+            rows = db.query("""
+                SELECT * FROM model_runs as A
+                WHERE datetime(A.created_at) = (
+                    SELECT max(datetime(B.created_at)) 
+                    FROM model_runs as B 
+                    WHERE B.model_id = A.model_id
+                )
+            """)
+            models: list[ModelRun] = []
+            for row in rows:
                 model = self.build_model_run_from_row(row)
                 models.append(model)
             return models
@@ -113,6 +133,7 @@ class SQLiteModelRunRepository(ModelRunRepository, SQLiteRepository):
             'failure_traceback': model.failure.traceback if model.failure else None,
             'failure_occurred_at': model.failure.occurred_at.isoformat() if model.failure else None,
             'in_quarantine': 1 if model.in_quarantine else 0,
+            'augmented_info': json.dumps(asdict(model.augmented_info)) if model.augmented_info else None
         }
 
         with self._open() as db:
@@ -182,5 +203,6 @@ class SQLiteModelRunRepository(ModelRunRepository, SQLiteRepository):
                 traceback=row["failure_traceback"],
                 occurred_at=datetime.datetime.fromisoformat(row["failure_occurred_at"]) if row["failure_occurred_at"] else None,
             ) if row["failure_error_code"] else None,
-            in_quarantine=row["in_quarantine"] == 1
+            in_quarantine=row["in_quarantine"] == 1,
+            augmented_info=ModelInfo(**json.loads(row["augmented_info"])) if row["augmented_info"] else None
         )

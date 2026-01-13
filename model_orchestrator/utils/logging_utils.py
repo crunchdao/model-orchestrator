@@ -73,7 +73,7 @@ def init_logger(logging_config: LoggingConfig, name="model-orchestrator"):
     console_handler = logging.StreamHandler()
     # console_handler.setLevel(config.get("log.console.level", 1))
     formatter_args = {
-        'fmt': "{asctime:^19} | {name} | {levelname[0]:^1} | {thread:^10} | {message}",
+        'fmt': "{asctime:^19} | {name:^20.20} | {levelname[0]:^1} | {thread:^10} | {message}",
         'style': "{",
         'datefmt': "%Y-%m-%d %H:%M:%S"
     }
@@ -104,3 +104,19 @@ def get_colored_logger(level, message, color: Fore, name="model-orchestrator"):
     if logger.isEnabledFor(level):
         colored_message = f"{color}{message}{Style.RESET_ALL}"
         logger.log(level, colored_message)
+
+
+def attach_uvicorn_to_my_logger(base_logger_name: str = "model-orchestrator") -> None:
+    base = logging.getLogger(base_logger_name)
+
+    # Reuse *your* handlers/formatter (console + file if any)
+    handlers = list(base.handlers)
+    level = base.level
+
+    for name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
+        l = logging.getLogger(name)
+        l.handlers.clear()
+        for h in handlers:
+            l.addHandler(h)
+        l.setLevel(level)
+        l.propagate = False

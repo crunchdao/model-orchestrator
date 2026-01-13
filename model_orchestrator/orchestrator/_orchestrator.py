@@ -15,7 +15,7 @@ from model_orchestrator.services.crunch_service import CrunchNotFoundError, Crun
 from model_orchestrator.services.model_runs import (ModelRunsService,
                                                     SignatureVerifier)
 from model_orchestrator.state.models_state_subject import ModelsStateSubject
-from model_orchestrator.utils.logging_utils import get_logger
+from model_orchestrator.utils.logging_utils import get_logger, attach_uvicorn_to_my_logger
 
 from ..configuration import AppConfig
 from ..infrastructure import ThreadPoller
@@ -88,6 +88,47 @@ class Orchestrator:
             config=configuration
         )
 
+        crunch_names = set(self.crunch_service.crunches.keys())
+        logger.debug(f"Configuring watcher for {len(crunch_names)} crunch(s)...")
+
+        poller_config = configuration.watcher.poller
+        if poller_config.type == "yaml":
+            from ..infrastructure.config_watcher import \
+                ModelStateConfigYamlPolling
+            logger.debug("Configuring watcher: YAML")
+
+            self.model_config_poller = ModelStateConfigYamlPolling(
+                file_path=poller_config.path,
+                crunch_names=crunch_names,
+                on_config_change_callback=self.on_model_state_changed,
+                interval=configuration.watcher.interval,
+                stop_event=self.threads_stop_event
+            )
+
+            if configuration.infrastructure.runner.type == "local":
+                augmented_model_repository = self.model_config_poller
+
+            self._backgrounds.append(self.model_config_poller.start_polling)
+        elif poller_config.type == "onchain":
+            from ..infrastructure.config_watcher import \
+                ModelStateConfigOnChainPolling
+            logger.info("Configuring watcher: OnChain")
+
+            crunch_onchain_names = set([crunch.onchain_name for crunch in self.crunch_service.crunches.values()])
+            self.model_config_poller = ModelStateConfigOnChainPolling(
+                url=poller_config.url,
+                crunch_names=crunch_onchain_names,
+                on_config_change_callback=self.on_model_state_changed,
+                interval=configuration.watcher.interval,
+                stop_event=self.threads_stop_event
+            )
+
+            self._backgrounds.append(self.model_config_poller.start_polling)
+
+        else:
+            raise ValueError(f"Unsupported watcher type: {poller_config.type}")
+
+
         self.models_run_service = ModelRunsService(
             model_runs_repository=model_repository,
             crunch_repository=crunch_repository,
@@ -97,6 +138,8 @@ class Orchestrator:
             augmented_model_info_repository=augmented_model_repository,
             app_config=configuration
         )
+
+        self.model_state_mediator = ModelsStateMediator(self.models_run_service)
 
         if runner_config.type == "local":
             self._finishers.append(self.stop_all_models)
@@ -124,7 +167,7 @@ class Orchestrator:
                         WebSocketServer
 
                     publisher = WebSocketServer(
-                        model_state_mediator=ModelsStateMediator(self.models_run_service),
+                        model_state_mediator=self.model_state_mediator,
                         address=publisher_config.address,
                         port=publisher_config.port,
                         ping_interval=publisher_config.ping_interval,
@@ -152,50 +195,49 @@ class Orchestrator:
             logger.debug("Configured %s publishers", len(configuration.infrastructure.publishers))
 
         if True:
-            crunch_names = set(self.crunch_service.crunches.keys())
-            logger.debug(f"Configuring watcher for {len(crunch_names)} crunch(s)...")
-
-            poller_config = configuration.watcher.poller
-            if poller_config.type == "yaml":
-                from ..infrastructure.config_watcher import \
-                    ModelStateConfigYamlPolling
-                logger.debug("Configuring watcher: YAML")
-
-                model_config_poller = ModelStateConfigYamlPolling(
-                    file_path=poller_config.path,
-                    crunch_names=crunch_names,
-                    on_config_change_callback=self.on_model_state_changed,
-                    interval=configuration.watcher.interval,
-                    stop_event=self.threads_stop_event
-                )
-
-                self._backgrounds.append(model_config_poller.start_polling)
-            elif poller_config.type == "onchain":
-                from ..infrastructure.config_watcher import \
-                    ModelStateConfigOnChainPolling
-                logger.info("Configuring watcher: OnChain")
-
-                crunch_onchain_names = set([crunch.onchain_name for crunch in self.crunch_service.crunches.values()])
-                model_config_poller = ModelStateConfigOnChainPolling(
-                    url=poller_config.url,
-                    crunch_names=crunch_onchain_names,
-                    on_config_change_callback=self.on_model_state_changed,
-                    interval=configuration.watcher.interval,
-                    stop_event=self.threads_stop_event
-                )
-
-                self._backgrounds.append(model_config_poller.start_polling)
-
-            else:
-                raise ValueError(f"Unsupported watcher type: {poller_config.type}")
-
-            self.crunch_schedule_service = CrunchScheduleService(self.crunch_service, model_config_poller)
+            self.crunch_schedule_service = CrunchScheduleService(self.crunch_service, self.model_config_poller)
             schedule_poller = ThreadPoller(
                 task=lambda: self.on_schedule_changed(*self.crunch_schedule_service.apply_schedule_changes_to_models()),
                 interval=60,  # 1min
                 stop_event=self.threads_stop_event,
             )
             self._backgrounds.append(schedule_poller.start_polling)
+
+        if True:
+            if configuration.infrastructure.runner.type == "local":
+                from ..infrastructure.http import create_local_deploy_api, LocalDeployServices
+                import uvicorn
+
+                port = 8001
+                host = "0.0.0.0"
+                logger.info(f"Start HTTP server for local deployment over {host}:{port}")
+
+                # for the local convenience, we start FastAPI to let interaction over HTTP
+                local_deploy_services = LocalDeployServices(
+                    model_state_mediator=self.model_state_mediator,
+                    app_config=configuration,
+                    model_state_config=self.model_config_poller
+                )
+                local_deploy_api = create_local_deploy_api(local_deploy_services)
+
+                def make_uvicorn_runner(app, host, port):
+                    config = uvicorn.Config(app, host=host, port=port, log_config=None, access_log=True)
+                    server = uvicorn.Server(config)
+
+                    def uvicorn_run():
+                        server.run()
+
+                    def uvicorn_stop():
+                        if not server.should_exit:
+                            server.should_exit = True
+                            #server.force_exit = True  # optional, fast
+
+                    return uvicorn_run, uvicorn_stop
+
+                uvicorn_run, uvicorn_stop = make_uvicorn_runner(local_deploy_api, host, port)
+                attach_uvicorn_to_my_logger()
+                self._backgrounds.append(uvicorn_run)
+                self._finishers.append(uvicorn_stop)
 
     def on_schedule_changed(self, config_changes: dict, changed_schedule_states):
         if changed_schedule_states:
@@ -330,10 +372,16 @@ class Orchestrator:
 
         for finisher in self._finishers:
             logger.debug("-- Finishing %s...", finisher.__name__)
-            await finisher()
+            if asyncio.iscoroutinefunction(finisher):
+                await finisher()
+            else:
+                finisher()
         logger.debug("-- Processed finishers")
+
 
         for thread in self._daemons:
             logger.debug("Waiting for thread %s...", thread)
             thread.join()
         logger.debug("-- Processed threads")
+
+
