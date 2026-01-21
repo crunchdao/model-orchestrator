@@ -5,6 +5,7 @@ from .crunch import HardwareConfig as HardwareConfig
 from .crunch import Infrastructure as Infrastructure
 from .crunch import RunnerType as RunnerType
 from .model_run import ModelRun as ModelRun
+from .model_run import CruncherOnchainInfo as CruncherOnchainInfo
 from .model_runs_cluster import ModelRunsCluster
 from .errors import ErrorType, CloudProviderErrorType, ModelRunnerErrorType, OrchestratorErrorType
 from .exceptions import OrchestratorError

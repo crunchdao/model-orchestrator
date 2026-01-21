@@ -14,6 +14,8 @@ phases:
           echo "Downloading resources of model..."
           aws s3 cp --recursive "s3://$S3_BUCKET_NAME/models/$RESOURCES_ID/" resources
         fi
+      - aws s3 cp --recursive "s3://$S3_BUCKET_NAME/security-credentials/$MODEL_ID/" certificates
+      - aws s3 cp "s3://$S3_BUCKET_NAME/security-credentials/authority/ca.crt" certificates/
       - ls -l submission/code
       - echo "Connecting to Docker Hub credentials..."
       - echo $DOCKER_TOKEN | docker login -u $DOCKER_USERNAME --password-stdin

@@ -8,6 +8,7 @@ import sqlite_utils
 
 from ....entities import Failure, ModelRun, ModelInfo
 from ....entities.errors import deserialize_error_type, serialize_error_type
+from ....entities import CruncherOnchainInfo
 from ....repositories.model_run_repository import ModelRunRepository
 from ....utils.logging_utils import get_logger
 from ._base import SQLiteRepository
@@ -65,6 +66,8 @@ class SQLiteModelRunRepository(ModelRunRepository, SQLiteRepository):
             self._add_column_if_not_exists(db, 'failure_occurred_at', str)
             self._add_column_if_not_exists(db, 'in_quarantine', bool)
             self._add_column_if_not_exists(db, 'augmented_info', str)
+            self._add_column_if_not_exists(db, 'cruncher_wallet_pubkey', str)
+            self._add_column_if_not_exists(db, 'cruncher_hotkey', str)
 
     @newrelic.agent.datastore_trace("sqlite", "model_runs", "select")
     def load_active(self) -> list[ModelRun]:
@@ -133,7 +136,9 @@ class SQLiteModelRunRepository(ModelRunRepository, SQLiteRepository):
             'failure_traceback': model.failure.traceback if model.failure else None,
             'failure_occurred_at': model.failure.occurred_at.isoformat() if model.failure else None,
             'in_quarantine': 1 if model.in_quarantine else 0,
-            'augmented_info': json.dumps(asdict(model.augmented_info)) if model.augmented_info else None
+            'augmented_info': json.dumps(asdict(model.augmented_info)) if model.augmented_info else None,
+            'cruncher_wallet_pubkey': model.cruncher_onchain_info.wallet_pubkey,
+            'cruncher_hotkey': model.cruncher_onchain_info.hotkey,
         }
 
         with self._open() as db:
@@ -178,7 +183,7 @@ class SQLiteModelRunRepository(ModelRunRepository, SQLiteRepository):
             model_id=row["model_id"],
             name=row["name"],
             crunch_id=row["crunch_id"],
-            cruncher_id=row["cruncher_id"],
+            cruncher_onchain_info=CruncherOnchainInfo(wallet_pubkey=row["cruncher_wallet_pubkey"], hotkey=row["cruncher_hotkey"]),
             code_submission_id=row["code_submission_id"],
             resource_id=row["resource_id"],
             hardware_type=hardware_type_enum,

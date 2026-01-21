@@ -180,6 +180,8 @@ class WebSocketServer(ModelsStateObserver):
                 'model_name': model_name,
                 'cruncher_id': model_run.cruncher_id,
                 'cruncher_name': cruncher_name,
+                'cruncher_wallet_pubkey': model_run.cruncher_onchain_info.wallet_pubkey,
+                'cruncher_hotkey': model_run.cruncher_onchain_info.hotkey,
             },
             'state': str(state.value),
             'ip': model_run.ip,

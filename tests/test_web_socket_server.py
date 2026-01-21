@@ -5,7 +5,7 @@ import asyncio
 import websockets
 import json
 
-from model_orchestrator.entities import ModelRun
+from model_orchestrator.entities import ModelRun, CruncherOnchainInfo
 from model_orchestrator.infrastructure.messaging.websocket_server import WebSocketServer
 from model_orchestrator.utils.logging_utils import get_logger
 
@@ -25,7 +25,7 @@ class TestWebSocketServer(unittest.TestCase):
                 model_id='mock_model_id',
                 name='mock_model_name',
                 crunch_id='test_crunch',
-                cruncher_id='test_cruncher_id',
+                cruncher_onchain_info=CruncherOnchainInfo(wallet_pubkey="test_cruncher_id", hotkey=""),
                 code_submission_id='test_code_submission_id',
                 resource_id="test_resource_id",
                 hardware_type=ModelRun.HardwareType.CPU,
