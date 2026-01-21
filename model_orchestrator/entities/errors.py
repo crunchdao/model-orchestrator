@@ -58,12 +58,27 @@ def deserialize_error_type(serialized: str):
     if not serialized:
         return None
 
-    serialized = json.loads(serialized)
-    error_type_class = globals().get(serialized["type"])
-    if not error_type_class or not issubclass(error_type_class, ErrorType):
+    try:
+        payload = json.loads(serialized)
+    except (TypeError, ValueError):
         return None
 
-    return error_type_class[serialized["value"]]
+    enum_name = payload.get("type")
+    raw_value = payload.get("value")
+    if not enum_name:
+        return None
+
+    enum_cls = globals().get(enum_name)
+    if not isinstance(enum_cls, type) or not issubclass(enum_cls, ErrorType):
+        return None
+
+    try:
+        return enum_cls(raw_value)
+    except (ValueError, TypeError):
+        try:
+            return enum_cls[raw_value]
+        except Exception:
+            return None
 
 
 def get_model_runner_error(error_type: str):
