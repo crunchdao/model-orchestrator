@@ -60,7 +60,7 @@ class TestWebSocketServer(unittest.TestCase):
             init_msg = await client.recv()
             self.assertEqual(json.loads(init_msg),
                              {"event": "init",
-                              "data": [{"deployment_id": "mock_model_id_20250915_143034_791", "model_id": "mock_model_id", "infos": {"model_name": "mock_model_name", "cruncher_id": "test_cruncher_id", "cruncher_name": "test_cruncher_id"}, "state": "RUNNING", "ip": "127.0.0.1", "port": 8080}]})
+                              "data": [{"deployment_id": "mock_model_id_20250915_143034_791", "model_id": "mock_model_id", "infos": {"cruncher_hotkey": "",  "cruncher_wallet_pubkey": "test_cruncher_id", "model_name": "mock_model_name", "cruncher_id": "test_cruncher_id", "cruncher_name": "test_cruncher_id"}, "state": "RUNNING", "ip": "127.0.0.1", "port": 8080}]})
 
             self.server.on_runner_state_changed(self.model_state_mediator_mock.get_running_models.return_value[0], ModelRun.RunnerStatus.RUNNING, ModelRun.RunnerStatus.STOPPED)
 
@@ -68,7 +68,7 @@ class TestWebSocketServer(unittest.TestCase):
             upd_msg = await client.recv()
             self.assertEqual(json.loads(upd_msg),
                              {"event": "update",
-                              "data": [{"deployment_id": "mock_model_id_20250915_143034_791", "model_id": "mock_model_id", "infos": {"model_name": "mock_model_name", "cruncher_id": "test_cruncher_id", "cruncher_name": "test_cruncher_id"}, "state": "STOPPED", "ip": "127.0.0.1", "port": 8080}]})
+                              "data": [{"deployment_id": "mock_model_id_20250915_143034_791", "model_id": "mock_model_id", "infos": {"cruncher_hotkey": "",  "cruncher_wallet_pubkey": "test_cruncher_id", "model_name": "mock_model_name", "cruncher_id": "test_cruncher_id", "cruncher_name": "test_cruncher_id"}, "state": "STOPPED", "ip": "127.0.0.1", "port": 8080}]})
 
             await client.send(json.dumps({"event": "report_failure", "data": [{"model_id": "mock_model_id", "failure_code": "CONNECTION_FAILED", "ip": "127.0.0.1"}]}))
 
