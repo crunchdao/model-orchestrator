@@ -1,8 +1,15 @@
+from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 
 from .model_info import ModelInfo
 from .failure import Failure
+
+
+@dataclass
+class CruncherOnchainInfo:
+    wallet_pubkey: str
+    hotkey: str
 
 
 class ModelRun:
@@ -33,38 +40,38 @@ class ModelRun:
 
     # todo rename to ModelRun + id unique id + rename id per model_id
     def __init__(
-            self,
-            id: str | None,
-            model_id: str,
-            name: str,
-            crunch_id: str,
-            cruncher_id: str,
-            code_submission_id: str,
-            resource_id: str,
-            hardware_type: HardwareType,
-            desired_status: DesiredStatus,
-            docker_image: str = None,
-            runner_status: RunnerStatus = None,
-            builder_status: BuilderStatus = None,
-            runner_job_id: str = None,
-            builder_job_id: str = None,
-            ip: str = None,
-            port: int = None,
-            created_at: datetime = None,
-            last_update: datetime = None,
-            runner_info: dict = None,
-            runner_logs_arn: str = None,
-            builder_logs_arn: str = None,
-            failure: Failure = None,
-            in_quarantine: bool = False,
-            augmented_info: ModelInfo | None = None
-        ):
+        self,
+        id: str | None,
+        model_id: str,
+        name: str,
+        crunch_id: str,
+        cruncher_onchain_info: CruncherOnchainInfo,
+        code_submission_id: str,
+        resource_id: str,
+        hardware_type: HardwareType,
+        desired_status: DesiredStatus,
+        docker_image: str = None,
+        runner_status: RunnerStatus = None,
+        builder_status: BuilderStatus = None,
+        runner_job_id: str = None,
+        builder_job_id: str = None,
+        ip: str = None,
+        port: int = None,
+        created_at: datetime = None,
+        last_update: datetime = None,
+        runner_info: dict = None,
+        runner_logs_arn: str = None,
+        builder_logs_arn: str = None,
+        failure: Failure = None,
+        in_quarantine: bool = False,
+        augmented_info: ModelInfo | None = None
+    ):
         """
         Expected fields:
         :param model_id: unique id of the model, if the cruncher change the code by new submission of the code, this id will remain unchanged.
         :param name: Name of the model chose per the cruncher
         :param crunch_id: unique id of the crunch (game)
-        :param cruncher_id: unique id of the cruncher (public key from blockchain)
+        :param cruncher_onchain_info: Contains cruncher's wallet public key and hotkey from the blockchain.
         :param code_submission_id: unique if of the submitted code, if the cruncher change the code by new submission of the code, this id will change
         :param resource_id: The cruncher can train their model, serialize it into a specific format, and store it in the resources section. This ID allows access to it.
         :param hardware_type: Type of hardware required for the execution of the model, e.g. CPU, GPU,
@@ -86,7 +93,8 @@ class ModelRun:
         self.model_id = model_id
         self.name = name
         self.crunch_id = crunch_id
-        self.cruncher_id = cruncher_id
+        self.cruncher_id = cruncher_onchain_info.wallet_pubkey  # TODO deprecate
+        self.cruncher_onchain_info = cruncher_onchain_info
         self.docker_image = docker_image
         self.code_submission_id = code_submission_id
         self.resource_id = resource_id

@@ -1,12 +1,11 @@
 import threading
 
 from model_orchestrator.configuration.properties import AppConfig
-from model_orchestrator.entities import ModelRunsCluster, OrchestratorError, ModelRunnerErrorType
+from model_orchestrator.entities import ModelRunsCluster, OrchestratorError, ModelRun, CruncherOnchainInfo
 from model_orchestrator.entities.crunch import Crunch
 from model_orchestrator.entities.errors import OrchestratorErrorType, get_model_runner_error
 from model_orchestrator.entities.exceptions import OrchestratorErrors
 
-from model_orchestrator.entities.model_run import ModelRun
 from model_orchestrator.repositories.augmented_model_info_repository import AugmentedModelInfoRepository
 from model_orchestrator.repositories.crunch_repository import CrunchRepository
 from model_orchestrator.repositories.model_run_repository import ModelRunRepository
@@ -69,7 +68,18 @@ class ModelRunsService:
 
         self.lock = threading.Lock()
 
-    def start_model(self, model_id: str, name: str, cruncher_id: str, code_submission_id: str, resource_id: str, hardware_type: ModelRun.HardwareType, crunch: Crunch):
+    def start_model(
+        self,
+        model_id: str,
+        name: str,
+        cruncher_id: str,  # todo deprecated
+        code_submission_id: str,
+        resource_id: str,
+        hardware_type: ModelRun.HardwareType,
+        crunch: Crunch,
+        cruncher_wallet_pubkey: str = None,
+        cruncher_hotkey: str = None
+    ):
         crunch_id = crunch.id
         get_logger().info(f'Received start model request id:{model_id}, name:{name}, crunch ID: {crunch_id}')
 
@@ -103,20 +113,33 @@ class ModelRunsService:
                     resource_id=resource_id,
                     hardware_type=hardware_type,
                     crunch=crunch,
-                    replaced_model=replaced_model
-
+                    replaced_model=replaced_model,
+                    cruncher_wallet_pubkey=cruncher_wallet_pubkey,
+                    cruncher_hotkey=cruncher_hotkey
                 )
             except OrchestratorError as e:
                 self.error_handling.handle_error_from_exception(e)
                 return
 
-    def _start_new_model(self, model_id: str, name: str, cruncher_id: str, code_submission_id: str, resource_id: str, hardware_type: ModelRun.HardwareType, crunch: Crunch, replaced_model: ModelRun = None):
+    def _start_new_model(
+        self,
+        model_id: str,
+        name: str,
+        cruncher_id: str,  # will be deprecated
+        code_submission_id: str,
+        resource_id: str,
+        hardware_type: ModelRun.HardwareType,
+        crunch: Crunch,
+        replaced_model: ModelRun = None,
+        cruncher_wallet_pubkey: str = None,
+        cruncher_hotkey: str = None
+    ):
         model = ModelRun(
             None,
             model_id=model_id,
             name=name,
             crunch_id=crunch.id,
-            cruncher_id=cruncher_id,
+            cruncher_onchain_info=CruncherOnchainInfo(wallet_pubkey=cruncher_wallet_pubkey or cruncher_id, hotkey=cruncher_hotkey),
             code_submission_id=code_submission_id,
             resource_id=resource_id,
             hardware_type=hardware_type,

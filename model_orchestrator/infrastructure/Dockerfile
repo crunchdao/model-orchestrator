@@ -2,7 +2,8 @@
 ARG BASE_IMAGE=python:3.13
 
 FROM $BASE_IMAGE
-RUN echo "[global]" >> /etc/pip.conf && \
+RUN apt update && apt install -y git && \
+    echo "[global]" >> /etc/pip.conf && \
     echo "no-cache-dir = true" >> /etc/pip.conf && \
     echo "index-url = https://pypi.org/simple" >> /etc/pip.conf && \
     echo "extra-index-url =" >> /etc/pip.conf && \
@@ -37,9 +38,12 @@ RUN pip install --upgrade pip && \
 
 COPY submission/code/ ./
 COPY resources /workspace/resources
+COPY certificates /workspace/certificates
+
 RUN ln -s /workspace/resources/ /workspace/submission/code/resources
 
-RUN pip install 'crunch-model-runner >0,<1'
+RUN pip install "git+https://github.com/crunchdao/model-runner.git@feat/grpc-secure"
+
 
 ARG HAS_GPU=False
 ENV HAS_GPU=$HAS_GPU

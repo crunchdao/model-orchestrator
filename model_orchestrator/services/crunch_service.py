@@ -4,8 +4,9 @@ from model_orchestrator.services import Builder, Runner
 from model_orchestrator.utils.logging_utils import get_logger
 
 from ..entities import CpuConfig, Crunch, GpuConfig, Infrastructure, RunnerType, ModelRun
-from ..entities.crunch import RunSchedule, ScheduleStatus
+from ..entities.crunch import RunSchedule, ScheduleStatus, CoordinatorInfo
 from ..infrastructure.config_watcher import ModelStateConfigPolling, ModelStateConfigOnChainPolling
+from model_orchestrator.infrastructure.config_watcher import ModelStateConfigOnChain
 
 logger = get_logger(__name__)
 
@@ -91,12 +92,13 @@ class CrunchService:
                         memory=crunch_config.infrastructure.gpu_config.memory,
                         instances_types=crunch_config.infrastructure.gpu_config.instances_types,
                         gpus=crunch_config.infrastructure.gpu_config.gpus
-                    )
+                    ),
+                    is_secure=crunch_config.infrastructure.is_secure
                 )
 
-            if self.config.watcher.poller == "onchain" and not crunch_config.onchain_name:
+            if self.config.watcher.poller.type == "onchain" and not crunch_config.onchain_name:
                 logger.warning(f"Crunch {crunch_config.id} has no onchain name, using crunch id instead")
-                crunch_config.onchain_name = crunch_config.name
+                crunch_config.onchain_name = crunch_config.id
 
             crunch = Crunch(
                 id=crunch_config.id,
@@ -114,6 +116,24 @@ class CrunchService:
             crunch.runner_config = self.model_runner.create(crunch)
             crunch.builder_config = self.model_builder.create(crunch)
 
+            self.crunch_repository.save(crunch)
+
+    def update_onchain_infos(self, crunch, config: ModelStateConfigOnChain):
+        updated = False
+
+        if crunch.onchain_address != config.crunch_address:
+            crunch.onchain_address = config.crunch_address
+            updated = True
+
+        new_info = CoordinatorInfo(
+            wallet_pubkey=config.coordinator_wallet_pubkey,
+            hotkey=config.coordinator_hotkey,
+        )
+        if crunch.coordinator_info != new_info:
+            crunch.coordinator_info = new_info
+            updated = True
+
+        if updated:
             self.crunch_repository.save(crunch)
 
 

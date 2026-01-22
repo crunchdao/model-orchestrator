@@ -2,7 +2,7 @@ import asyncio
 import unittest
 from unittest.mock import Mock, MagicMock, ANY
 
-from model_orchestrator.entities import ModelRun, OrchestratorErrorType, ModelRunnerErrorType, CloudProviderErrorType, ModelInfo
+from model_orchestrator.entities import ModelRun, OrchestratorErrorType, ModelRunnerErrorType, CloudProviderErrorType, ModelInfo, CruncherOnchainInfo
 from model_orchestrator.services.model_runs import ModelRunsService
 
 
@@ -189,7 +189,7 @@ class TestModelRunsService(unittest.TestCase):
                 model_id="mock_model_id",
                 name="mock_name",
                 crunch_id=MagicMock(),
-                cruncher_id="mock_cruncher_id",
+                cruncher_onchain_info=CruncherOnchainInfo(wallet_pubkey="mock_cruncher_id", hotkey=""),
                 code_submission_id="mock_code_submission_id",
                 resource_id="mock_resource_id",
                 hardware_type=ModelRun.HardwareType.CPU,
@@ -233,7 +233,7 @@ class TestModelRunsService(unittest.TestCase):
                 model_id="mock_model_id",
                 name="mock_name",
                 crunch_id=MagicMock(),
-                cruncher_id="mock_cruncher_id",
+                cruncher_onchain_info=CruncherOnchainInfo(wallet_pubkey="mock_cruncher_id", hotkey=""),
                 code_submission_id="mock_code_submission_id",
                 resource_id="mock_resource_id",
                 hardware_type=ModelRun.HardwareType.CPU,
@@ -273,7 +273,7 @@ class TestModelRunsService(unittest.TestCase):
                 model_id="mock_model_id",
                 name="mock_name",
                 crunch_id=MagicMock(),
-                cruncher_id="mock_cruncher_id",
+                cruncher_onchain_info=CruncherOnchainInfo(wallet_pubkey="mock_cruncher_id", hotkey=""),
                 code_submission_id="mock_code_submission_id",
                 resource_id="mock_resource_id",
                 hardware_type=ModelRun.HardwareType.CPU,
@@ -353,7 +353,7 @@ class TestModelRunsService(unittest.TestCase):
                 model_id="mock_model_id",
                 name="mock_name",
                 crunch_id=MagicMock(),
-                cruncher_id="mock_cruncher_id",
+                cruncher_onchain_info=CruncherOnchainInfo(wallet_pubkey="mock_cruncher_id", hotkey=""),
                 code_submission_id="mock_code_submission_id",
                 resource_id="mock_resource_id",
                 hardware_type=ModelRun.HardwareType.CPU,
