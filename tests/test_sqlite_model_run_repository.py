@@ -6,7 +6,7 @@ import os
 import sqlite_utils
 
 from model_orchestrator.entities import ErrorType, OrchestratorError, OrchestratorErrorType
-from model_orchestrator.entities.model_run import ModelRun
+from model_orchestrator.entities.model_run import ModelRun, CruncherOnchainInfo
 from model_orchestrator.entities.failure import Failure
 from model_orchestrator.infrastructure.db.sqlite import SQLiteModelRunRepository
 
@@ -43,7 +43,7 @@ class TestSQLiteModelRunRepository(unittest.TestCase):
             model_id="1",
             name="Test Model",
             crunch_id="crunch_001",
-            cruncher_id="cruncher_001",
+            cruncher_onchain_info=CruncherOnchainInfo(wallet_pubkey="cruncher_001", hotkey=""),
             code_submission_id="code_sub_001",
             resource_id="res_001",
             hardware_type=ModelRun.HardwareType.CPU,

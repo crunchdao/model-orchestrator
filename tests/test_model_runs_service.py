@@ -2,7 +2,7 @@ import asyncio
 import unittest
 from unittest.mock import Mock, MagicMock, ANY
 
-from model_orchestrator.entities import ModelRun, OrchestratorErrorType, ModelRunnerErrorType, CloudProviderErrorType, ModelInfo
+from model_orchestrator.entities import ModelRun, OrchestratorErrorType, ModelRunnerErrorType, CloudProviderErrorType, ModelInfo, CruncherOnchainInfo
 from model_orchestrator.services.model_runs import ModelRunsService
 
 
@@ -112,13 +112,13 @@ class TestModelRunsService(unittest.TestCase):
         self.runner.stop.assert_called()
         self.runner.load_statuses.assert_called()
         self.state_subject_mock.notify_runner_state_changed.assert_called_with(ANY, ModelRun.RunnerStatus.RUNNING, ModelRun.RunnerStatus.STOPPED)
-        self.assertEqual(len(self.model_runs_service.cluster.models), 1)
+        self.assertEqual(len(list(self.model_runs_service.cluster.models)), 1)
 
         # refresh status
         self.model_runs_service.updates_states()
         self.runner.load_statuses.assert_called()
         self.state_subject_mock.notify_runner_state_changed.assert_called_with(ANY, ModelRun.RunnerStatus.RUNNING, ModelRun.RunnerStatus.STOPPED)
-        self.assertEqual(len(self.model_runs_service.cluster.models), 0)
+        self.assertEqual(len(list(self.model_runs_service.cluster.models)), 0)
 
     def test_model_build_fail_scenario(self):
         self.builder.is_built = Mock(return_value=(False, None))
@@ -173,7 +173,7 @@ class TestModelRunsService(unittest.TestCase):
         self.assertEqual(model_run.failure.error_code, OrchestratorErrorType.IN_QUARANTINE)
         self.assertEqual(model_run.failure.reason, OrchestratorErrorType.IN_QUARANTINE.default_reason)
 
-        self.assertEqual(len(self.model_runs_service.cluster.models), 0)
+        self.assertEqual(len(list(self.model_runs_service.cluster.models)), 0)
 
     def test_failure_receive_from_ws_client(self):
         def status_generator():
@@ -189,7 +189,7 @@ class TestModelRunsService(unittest.TestCase):
                 model_id="mock_model_id",
                 name="mock_name",
                 crunch_id=MagicMock(),
-                cruncher_id="mock_cruncher_id",
+                cruncher_onchain_info=CruncherOnchainInfo(wallet_pubkey="mock_cruncher_id", hotkey=""),
                 code_submission_id="mock_code_submission_id",
                 resource_id="mock_resource_id",
                 hardware_type=ModelRun.HardwareType.CPU,
@@ -217,7 +217,7 @@ class TestModelRunsService(unittest.TestCase):
         self.assertEqual(model_run.failure.error_code, ModelRunnerErrorType.BAD_IMPLEMENTATION)
         self.assertEqual(model_run.failure.reason, ModelRunnerErrorType.BAD_IMPLEMENTATION.default_reason)
 
-        self.assertEqual(len(self.model_runs_service.cluster.models), 0)
+        self.assertEqual(len(list(self.model_runs_service.cluster.models)), 0)
 
     def test_unexpected_stop(self):
         def status_generator():
@@ -233,7 +233,7 @@ class TestModelRunsService(unittest.TestCase):
                 model_id="mock_model_id",
                 name="mock_name",
                 crunch_id=MagicMock(),
-                cruncher_id="mock_cruncher_id",
+                cruncher_onchain_info=CruncherOnchainInfo(wallet_pubkey="mock_cruncher_id", hotkey=""),
                 code_submission_id="mock_code_submission_id",
                 resource_id="mock_resource_id",
                 hardware_type=ModelRun.HardwareType.CPU,
@@ -262,7 +262,7 @@ class TestModelRunsService(unittest.TestCase):
         self.assertEqual(model_run.failure.reason, OrchestratorErrorType.STOP_UNEXPECTED.default_reason)
         self.assertEqual(model_run.in_quarantine, False)
 
-        self.assertEqual(len(self.model_runs_service.cluster.models), 0)
+        self.assertEqual(len(list(self.model_runs_service.cluster.models)), 0)
 
     def test_run_failed(self):
         self.runner.load_statuses = Mock(side_effect=lambda models: {model: (ModelRun.RunnerStatus.FAILED, None, None) for model in models})
@@ -273,7 +273,7 @@ class TestModelRunsService(unittest.TestCase):
                 model_id="mock_model_id",
                 name="mock_name",
                 crunch_id=MagicMock(),
-                cruncher_id="mock_cruncher_id",
+                cruncher_onchain_info=CruncherOnchainInfo(wallet_pubkey="mock_cruncher_id", hotkey=""),
                 code_submission_id="mock_code_submission_id",
                 resource_id="mock_resource_id",
                 hardware_type=ModelRun.HardwareType.CPU,
@@ -294,7 +294,7 @@ class TestModelRunsService(unittest.TestCase):
         self.assertEqual(model_run.failure.error_code, OrchestratorErrorType.RUN_FAILED)
         self.assertEqual(model_run.failure.reason, OrchestratorErrorType.RUN_FAILED.default_reason)
 
-        self.assertEqual(len(self.model_runs_service.cluster.models), 0)
+        self.assertEqual(len(list(self.model_runs_service.cluster.models)), 0)
 
     def test_run_aws_failed(self):
         self.builder.is_built = Mock(return_value=(True, "docker_image"))
@@ -316,7 +316,7 @@ class TestModelRunsService(unittest.TestCase):
         self.assertEqual(model_run.failure.reason, CloudProviderErrorType.RUN_EXCEPTION.default_reason)
         self.assertIsNotNone(model_run.failure.exception)
         self.assertIsNotNone(model_run.failure.traceback)
-        self.assertEqual(len(self.model_runs_service.cluster.models), 0)
+        self.assertEqual(len(list(self.model_runs_service.cluster.models)), 0)
 
     def test_build_aws_failed(self):
         self.builder.is_built = Mock(side_effect=Exception("AWS failed to check build status"))
@@ -342,7 +342,7 @@ class TestModelRunsService(unittest.TestCase):
         self.assertIsNotNone(model_run.failure.exception)
         self.assertIsNotNone(model_run.failure.traceback)
 
-        self.assertEqual(len(self.model_runs_service.cluster.models), 0)
+        self.assertEqual(len(list(self.model_runs_service.cluster.models)), 0)
 
     def test_stop_aws_failed(self):
         self.runner.stop = Mock(side_effect=Exception("AWS failed to load statuses"))
@@ -353,7 +353,7 @@ class TestModelRunsService(unittest.TestCase):
                 model_id="mock_model_id",
                 name="mock_name",
                 crunch_id=MagicMock(),
-                cruncher_id="mock_cruncher_id",
+                cruncher_onchain_info=CruncherOnchainInfo(wallet_pubkey="mock_cruncher_id", hotkey=""),
                 code_submission_id="mock_code_submission_id",
                 resource_id="mock_resource_id",
                 hardware_type=ModelRun.HardwareType.CPU,
@@ -373,7 +373,7 @@ class TestModelRunsService(unittest.TestCase):
         self.assertEqual(model_run.failure.reason, CloudProviderErrorType.RUN_EXCEPTION.default_reason)
         self.assertIsNotNone(model_run.failure.exception)
         self.assertIsNotNone(model_run.failure.traceback)
-        self.assertEqual(len(self.model_runs_service.cluster.models), 0)
+        self.assertEqual(len(list(self.model_runs_service.cluster.models)), 0)
 
 
 if __name__ == '__main__':

@@ -67,7 +67,7 @@ class _RunService:
 
         else:
             get_logger().debug(f"Model is in build phase, we do not need to stop it")
-            self.cluster.models.remove(model)
+            self.cluster.remove(model)
 
     def update_models_info(self, models=None):
         models = self.cluster.get_models_in_run_phase() if models is None else models

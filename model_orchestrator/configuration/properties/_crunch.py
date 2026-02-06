@@ -24,6 +24,8 @@ class InfrastructureConfig(_BaseConfig):
     zone: str = Field(..., description="AWS zone or region")
     cpu_config: Optional[CpuConfig] = Field(None, description="CPU configuration")
     gpu_config: Optional[GpuConfig] = Field(None, description="GPU configuration")
+    is_secure: bool = Field(False, description="Specifies whether the infrastructure setup uses a security model protocol.")
+    debug_grpc: bool = Field(False, description="Enables gRPC debug logging (GRPC_TRACE and GRPC_VERBOSITY).")
 
 
 class RunScheduleConfig(_BaseConfig):

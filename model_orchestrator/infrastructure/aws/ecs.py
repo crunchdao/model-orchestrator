@@ -62,7 +62,20 @@ class AwsEcsModelRunner(Runner):
             vcpus=infrastructure_config.gpu_config.vcpus if is_gpu else infrastructure_config.cpu_config.vcpus,
             memory=infrastructure_config.gpu_config.memory if is_gpu else infrastructure_config.cpu_config.memory,
             gpu_count=infrastructure_config.gpu_config.gpus if is_gpu else None,
-            execution_role_arn=task_execution_role_arn
+            execution_role_arn=task_execution_role_arn,
+            env=[
+                {'name': 'SECURE', 'value': str(crunch.infrastructure.is_secure)},
+                {'name': 'MODEL_ID', 'value': model.model_id},
+                {'name': 'CRUNCH_ONCHAIN_ADDRESS', 'value': crunch.onchain_address or ''},
+                {'name': 'CRUNCHER_WALLET_PUBKEY', 'value': model.cruncher_onchain_info.wallet_pubkey or ''},
+                {'name': 'CRUNCHER_HOTKEY', 'value': model.cruncher_onchain_info.hotkey or ''},
+                {'name': 'COORDINATOR_WALLET_PUBKEY', 'value': (crunch.coordinator_info.wallet_pubkey if crunch.coordinator_info else '') or ''},
+                {'name': 'COORDINATOR_CERT_HASH', 'value': (crunch.coordinator_info.cert_hash if crunch.coordinator_info else '') or ''},
+                {'name': 'COORDINATOR_CERT_HASH_SECONDARY', 'value': (crunch.coordinator_info.cert_hash_secondary if crunch.coordinator_info else '') or ''},
+            ] + ([
+                {'name': 'GRPC_TRACE', 'value': 'handshaker, security, tsi'},
+                {'name': 'GRPC_VERBOSITY', 'value': 'DEBUG'}
+            ] if crunch.infrastructure.debug_grpc else [])
         )
 
         assign_public_ip = crunch.network_config.get(ASSIGN_PUBLIC_IP_KEY) if crunch.network_config else ASSIGN_PUBLIC_IP_DEFAULT
@@ -203,7 +216,18 @@ class AwsEcsRunner:
 
         return False  # No changes detected
 
-    def register_task_definition(self, family_name, container_name, docker_image, vcpus: int, memory: int, job_type: JobType, gpu_count=None, execution_role_arn=None):
+    def register_task_definition(
+        self,
+        family_name,
+        container_name,
+        docker_image,
+        vcpus: int,
+        memory: int,
+        job_type: JobType,
+        gpu_count=None,
+        execution_role_arn=None,
+        env=None
+    ):
         """
         Registers a new task definition only if there are changes
         compared to the latest existing task definition.
@@ -241,6 +265,7 @@ class AwsEcsRunner:
                     },
                     'essential': True,
                     'resourceRequirements': [{'value': str(gpu_count), 'type': 'GPU'}] if job_type == self.JobType.GPU and gpu_count is not None else [],
+                    'environment': env or [],
                 }
             ],
             "networkMode": 'awsvpc',

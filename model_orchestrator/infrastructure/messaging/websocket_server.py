@@ -95,7 +95,7 @@ class WebSocketServer(ModelsStateObserver):
 
         try:
             # On connection, send `init` event with current model states
-            await self.send_init_event(ws)
+            await self.send_init_event(ws, crunch_id)
 
             # Keep the connection alive by waiting for incoming messages
             async for message in ws:
@@ -111,16 +111,16 @@ class WebSocketServer(ModelsStateObserver):
             if not self.clients_by_crunch[crunch_id]:
                 del self.clients_by_crunch[crunch_id]
 
-    async def send_init_event(self, ws):
+    async def send_init_event(self, ws, crunch_id: str):
         """
-        Send the `init` event with the current state of all models.
+        Send the `init` event with the current state of models matching the crunch_id.
         """
 
         init_message = {
             'event': 'init',
             'data': [
                 self._create_model_state_message(model_run, model_run.runner_status)
-                for model_run in self.model_state_mediator.get_running_models()
+                for model_run in self.model_state_mediator.get_running_models_by_crunch_id(crunch_id)
             ],
         }
         await ws.send(json.dumps(init_message))
@@ -180,6 +180,8 @@ class WebSocketServer(ModelsStateObserver):
                 'model_name': model_name,
                 'cruncher_id': model_run.cruncher_id,
                 'cruncher_name': cruncher_name,
+                'cruncher_wallet_pubkey': model_run.cruncher_onchain_info.wallet_pubkey,
+                'cruncher_hotkey': model_run.cruncher_onchain_info.hotkey,
             },
             'state': str(state.value),
             'ip': model_run.ip,
@@ -206,7 +208,11 @@ class WebSocketServer(ModelsStateObserver):
         if 'event' in message and message['event'] == 'report_failure':
             data = message['data']
             for model in data:
-                self.model_state_mediator.report_failure(failure_code=model['failure_code'], model_id=model['model_id'], ip=model['ip'])
+                model_id = model['model_id']
+                if not self.model_state_mediator.is_model_in_crunch(model_id, crunch_id):
+                    get_logger().warning(f"Client {client_id} tried to report failure for model {model_id} not belonging to crunch {crunch_id}")
+                    continue
+                self.model_state_mediator.report_failure(failure_code=model['failure_code'], model_id=model_id, ip=model['ip'])
 
     async def _process_queue(self):
         stop = False

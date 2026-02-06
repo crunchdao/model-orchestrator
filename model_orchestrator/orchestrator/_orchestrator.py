@@ -19,6 +19,7 @@ from model_orchestrator.utils.logging_utils import get_logger, attach_uvicorn_to
 
 from ..configuration import AppConfig
 from ..infrastructure import ThreadPoller
+from ..infrastructure.config_watcher._onchain import ModelStateConfigOnChain
 from ..repositories.augmented_model_info_repository import DisabledAugmentedModelInfoRepository
 from ..utils.compat import add_signal_handler
 
@@ -248,7 +249,6 @@ class Orchestrator:
                 self.handle_model_state_changed(crunch, config_changes)
 
     def on_model_state_changed(self, config_changes: list[ModelStateConfig]):
-        poller_type = self.config.watcher.poller.type
 
         grouped_configs = defaultdict(list)
         for config in config_changes:
@@ -256,7 +256,13 @@ class Orchestrator:
 
         for crunch_id, configs in grouped_configs.items():
             try:
-                crunch = self.crunch_service.get_crunch_from_onchain_name(crunch_id) if poller_type == "onchain" else self.crunch_service.get_crunch(crunch_id)
+                config = configs[0]  # todo improve by grouping directly ModelStateConfig in a CrunchStateConfig or something like
+                if isinstance(config, ModelStateConfigOnChain):
+                    crunch = self.crunch_service.get_crunch_from_onchain_name(crunch_id)
+                    self.crunch_service.update_onchain_infos(crunch, config)
+                else:
+                    crunch = self.crunch_service.get_crunch(crunch_id)
+
             except CrunchNotFoundError:
                 get_logger().warning(f"Crunch with id {crunch_id} not found. Skipping model state change handling.")
                 continue
@@ -298,7 +304,9 @@ class Orchestrator:
                         code_submission_id=config.submission_id,
                         resource_id=config.resource_id,
                         hardware_type=config.hardware_type,
-                        crunch=crunch
+                        crunch=crunch,
+                        cruncher_wallet_pubkey=config.cruncher_wallet_pubkey if isinstance(config, ModelStateConfigOnChain) else None,
+                        cruncher_hotkey=config.cruncher_hotkey if isinstance(config, ModelStateConfigOnChain) else None,
                     )
 
                 elif desired_state == ModelRun.DesiredStatus.STOPPED:
