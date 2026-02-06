@@ -19,7 +19,7 @@ class TestWebSocketServer(unittest.TestCase):
         asyncio.set_event_loop(self.loop)
 
         self.model_state_mediator_mock = Mock()
-        self.model_state_mediator_mock.get_running_models.return_value = [
+        models =  [
             ModelRun(
                 id="mock_model_id_20250915_143034_791",
                 model_id='mock_model_id',
@@ -36,6 +36,8 @@ class TestWebSocketServer(unittest.TestCase):
                 port=8080,
             )
         ]
+        self.model_state_mediator_mock.get_running_models_by_crunch_id.return_value = models
+        self.model_state_mediator_mock.get_running_models.return_value = models
 
         self.server = WebSocketServer(
             model_state_mediator=self.model_state_mediator_mock,
