@@ -66,12 +66,12 @@ class AwsEcsModelRunner(Runner):
             env=[
                 {'name': 'SECURE', 'value': str(crunch.infrastructure.is_secure)},
                 {'name': 'MODEL_ID', 'value': model.model_id},
-                {'name': 'CRUNCH_ONCHAIN_ADDRESS', 'value': crunch.onchain_address},
-                {'name': 'CRUNCHER_WALLET_PUBKEY', 'value': model.cruncher_onchain_info.wallet_pubkey},
-                {'name': 'CRUNCHER_HOTKEY', 'value': model.cruncher_onchain_info.hotkey},
-                {'name': 'COORDINATOR_WALLET_PUBKEY', 'value': crunch.coordinator_info.wallet_pubkey},
-                {'name': 'COORDINATOR_CERT_HASH', 'value': crunch.coordinator_info.cert_hash},
-                {'name': 'COORDINATOR_CERT_HASH_SECONDARY', 'value': crunch.coordinator_info.cert_hash_secondary},
+                {'name': 'CRUNCH_ONCHAIN_ADDRESS', 'value': crunch.onchain_address or ''},
+                {'name': 'CRUNCHER_WALLET_PUBKEY', 'value': model.cruncher_onchain_info.wallet_pubkey or ''},
+                {'name': 'CRUNCHER_HOTKEY', 'value': model.cruncher_onchain_info.hotkey or ''},
+                {'name': 'COORDINATOR_WALLET_PUBKEY', 'value': (crunch.coordinator_info.wallet_pubkey if crunch.coordinator_info else '') or ''},
+                {'name': 'COORDINATOR_CERT_HASH', 'value': (crunch.coordinator_info.cert_hash if crunch.coordinator_info else '') or ''},
+                {'name': 'COORDINATOR_CERT_HASH_SECONDARY', 'value': (crunch.coordinator_info.cert_hash_secondary if crunch.coordinator_info else '') or ''},
             ] + ([
                 {'name': 'GRPC_TRACE', 'value': 'handshaker, security, tsi'},
                 {'name': 'GRPC_VERBOSITY', 'value': 'DEBUG'}
