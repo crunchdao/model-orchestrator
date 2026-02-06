@@ -53,9 +53,11 @@ class SQLiteCrunchRepository(SQLiteRepository, CrunchRepository):
             self._add_column_if_not_exists(db, 'crunches', 'cluster_name', str)
             self._add_column_if_not_exists(db, 'crunches', 'onchain_name', str)
             self._add_column_if_not_exists(db, 'crunches', 'is_secure', bool)
+            self._add_column_if_not_exists(db, 'crunches', 'debug_grpc', bool)
             self._add_column_if_not_exists(db, 'crunches', 'onchain_address', str)
             self._add_column_if_not_exists(db, 'crunches', 'coordinator_wallet_pubkey', str)
-            self._add_column_if_not_exists(db, 'crunches', 'coordinator_hotkey', str)
+            self._add_column_if_not_exists(db, 'crunches', 'coordinator_cert_hash', str)
+            self._add_column_if_not_exists(db, 'crunches', 'coordinator_cert_hash_secondary', str)
 
     def save(self, crunch: Crunch):
         with self._open() as db:
@@ -67,6 +69,7 @@ class SQLiteCrunchRepository(SQLiteRepository, CrunchRepository):
                     "cluster_name": crunch.infrastructure.cluster_name,
                     "infra_zone": crunch.infrastructure.zone,
                     "is_secure": crunch.infrastructure.is_secure,
+                    "debug_grpc": crunch.infrastructure.debug_grpc,
                     "runner_type": crunch.infrastructure.runner_type.value,
                     "cpu_vcpus": crunch.infrastructure.cpu_config.vcpus if crunch.infrastructure.cpu_config else None,
                     "cpu_memory": crunch.infrastructure.cpu_config.memory if crunch.infrastructure.cpu_config else None,
@@ -82,7 +85,8 @@ class SQLiteCrunchRepository(SQLiteRepository, CrunchRepository):
                     "run_schedule_tz": str(crunch.run_schedule.timezone) if crunch.run_schedule and crunch.run_schedule.timezone else None,
                     "onchain_address": crunch.onchain_address,
                     "coordinator_wallet_pubkey": crunch.coordinator_info.wallet_pubkey if crunch.coordinator_info else None,
-                    "coordinator_hotkey": crunch.coordinator_info.hotkey if crunch.coordinator_info else None,
+                    "coordinator_cert_hash": crunch.coordinator_info.cert_hash if crunch.coordinator_info else None,
+                    "coordinator_cert_hash_secondary": crunch.coordinator_info.cert_hash_secondary if crunch.coordinator_info else None,
                 },
                 pk="id"
             )
@@ -137,6 +141,7 @@ class SQLiteCrunchRepository(SQLiteRepository, CrunchRepository):
                 cluster_name=values["cluster_name"],
                 zone=values["infra_zone"],
                 is_secure=values["is_secure"],
+                debug_grpc=values.get("debug_grpc", False),
                 runner_type=RunnerType(values["runner_type"]),
                 cpu_config=CpuConfig(
                     vcpus=values["cpu_vcpus"],
@@ -158,7 +163,7 @@ class SQLiteCrunchRepository(SQLiteRepository, CrunchRepository):
                 ZoneInfo(values["run_schedule_tz"]) if values["run_schedule_tz"] else None
             ),
             onchain_address=values["onchain_address"],
-            coordinator_info=None if values["coordinator_wallet_pubkey"] is None else CoordinatorInfo(wallet_pubkey=values["coordinator_wallet_pubkey"], hotkey=values["coordinator_hotkey"])
+            coordinator_info=None if values["coordinator_wallet_pubkey"] is None else CoordinatorInfo(wallet_pubkey=values["coordinator_wallet_pubkey"], cert_hash=values["coordinator_cert_hash"], cert_hash_secondary=values["coordinator_cert_hash_secondary"])
         )
 
 

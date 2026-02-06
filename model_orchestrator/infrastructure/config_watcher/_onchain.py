@@ -14,14 +14,16 @@ class ModelStateConfigOnChain(ModelStateConfig):
         cruncher_wallet_pubkey: str,
         cruncher_hotkey: str,
         coordinator_wallet_pubkey: str,
-        coordinator_hotkey: str,
+        coordinator_cert_hash: str,
+        coordinator_cert_hash_secondary: str,
         **kwargs
     ):
         self.crunch_address = crunch_address
         self.cruncher_wallet_pubkey = cruncher_wallet_pubkey
         self.cruncher_hotkey = cruncher_hotkey
         self.coordinator_wallet_pubkey = coordinator_wallet_pubkey
-        self.coordinator_hotkey = coordinator_hotkey
+        self.coordinator_cert_hash = coordinator_cert_hash
+        self.coordinator_cert_hash_secondary = coordinator_cert_hash_secondary
 
         super().__init__(**kwargs)
 
@@ -32,7 +34,8 @@ class ModelStateConfigOnChain(ModelStateConfig):
             f"cruncher_wallet_pubkey={self.cruncher_wallet_pubkey}, "
             f"cruncher_hotkey={self.cruncher_hotkey}, "
             f"coordinator_wallet_pubkey={self.coordinator_wallet_pubkey}, "
-            f"coordinator_hotkey={self.coordinator_hotkey}"
+            f"coordinator_cert_hash={self.coordinator_cert_hash}, "
+            f"coordinator_cert_hash_secondary={self.coordinator_cert_hash_secondary}"
         )
 
         if base.endswith(")"):
@@ -75,7 +78,8 @@ class ModelStateConfigOnChainPolling(ModelStateConfigPolling):
                 cruncher_wallet_pubkey=config_entry["cruncherWalletPubkey"],
                 cruncher_hotkey=config_entry["cruncherSmpHotkey"],
                 coordinator_wallet_pubkey=config_entry["coordinatorWalletPubkey"],
-                coordinator_hotkey=config_entry["coordinatorSmpHotkey"],
+                coordinator_cert_hash=(config_entry.get("coordinatorCertificate") or {}).get("certHash", ""),
+                coordinator_cert_hash_secondary=(config_entry.get("coordinatorCertificate") or {}).get("certHashSecondary", ""),
                 id=config_entry["model"]["id"],
                 name="",  # config_entry["model"]["modelName"],
                 submission_id=config_entry["model"]["submissionId"],

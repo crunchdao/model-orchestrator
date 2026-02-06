@@ -71,12 +71,14 @@ class Infrastructure:
     GpuConfig = GpuConfig
 
     is_secure: bool = False
+    debug_grpc: bool = False
 
 
 @dataclass
 class CoordinatorInfo:
     wallet_pubkey: str
-    hotkey: str
+    cert_hash: str
+    cert_hash_secondary: str
 
 
 @dataclass

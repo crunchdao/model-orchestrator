@@ -93,7 +93,8 @@ class CrunchService:
                         instances_types=crunch_config.infrastructure.gpu_config.instances_types,
                         gpus=crunch_config.infrastructure.gpu_config.gpus
                     ),
-                    is_secure=crunch_config.infrastructure.is_secure
+                    is_secure=crunch_config.infrastructure.is_secure,
+                    debug_grpc=crunch_config.infrastructure.debug_grpc
                 )
 
             if self.config.watcher.poller.type == "onchain" and not crunch_config.onchain_name:
@@ -127,7 +128,8 @@ class CrunchService:
 
         new_info = CoordinatorInfo(
             wallet_pubkey=config.coordinator_wallet_pubkey,
-            hotkey=config.coordinator_hotkey,
+            cert_hash=config.coordinator_cert_hash,
+            cert_hash_secondary=config.coordinator_cert_hash_secondary,
         )
         if crunch.coordinator_info != new_info:
             crunch.coordinator_info = new_info
