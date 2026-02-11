@@ -1,0 +1,29 @@
+logging:
+  level: debug
+
+infrastructure:
+  database:
+    type: sqlite
+    path: "model_orchestrator/data/orchestrator-phala-test.db"
+
+  publishers:
+    - type: websocket
+      address: "0.0.0.0"
+      port: 9091
+
+  runner:
+    type: phala
+    cluster-urls:
+      - "https://8b85319c46f7b82bbd7af014e64d162ad75c74f0-<model-port>.dstack-pha-prod10.phala.network"
+    spawntee-port: 9010
+    request-timeout: 60
+
+watcher:
+  interval: 10
+  poller:
+    type: yaml
+    path: "model_orchestrator/data/models-phala-test.yml"
+
+crunches:
+  - id: "bird_tracker"
+    name: "bird tracker"

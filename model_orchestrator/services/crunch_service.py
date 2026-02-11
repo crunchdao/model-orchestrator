@@ -59,16 +59,20 @@ class CrunchService:
     def create_crunches(self):
 
         # Get runner type from infrastructure config
-        runner_type = RunnerType.AWS_ECS if self.config.infrastructure.runner.type == "aws" else RunnerType.LOCAL
+        runner_type_str = self.config.infrastructure.runner.type
+        runner_type_map = {"aws": RunnerType.AWS_ECS, "local": RunnerType.LOCAL, "phala": RunnerType.PHALA}
+        runner_type = runner_type_map.get(runner_type_str)
+        if runner_type is None:
+            raise ValueError(f"Unknown runner type: {runner_type_str}")
 
         config_crunches = []
 
         for crunch_config in self.config.crunches:
-            # For local runner, don't create CPU/GPU configs as they don't make sense
-            if runner_type == RunnerType.LOCAL:
+            # For local and phala runners, don't create CPU/GPU configs
+            if runner_type in (RunnerType.LOCAL, RunnerType.PHALA):
                 infrastructure = Infrastructure(
                     cluster_name=crunch_config.infrastructure.cluster_name if crunch_config.infrastructure else None,
-                    zone=crunch_config.infrastructure.zone if crunch_config.infrastructure else "local",
+                    zone=crunch_config.infrastructure.zone if crunch_config.infrastructure else "tee" if runner_type == RunnerType.PHALA else "local",
                     runner_type=runner_type,
                     cpu_config=None,
                     gpu_config=None

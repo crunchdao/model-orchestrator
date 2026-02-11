@@ -10,6 +10,7 @@ from model_orchestrator.configuration.properties import RunScheduleConfig
 class RunnerType(Enum):
     AWS_ECS = "AWS_ECS"
     LOCAL = "LOCAL"
+    PHALA = "PHALA"
 
 
 @dataclass(kw_only=True)

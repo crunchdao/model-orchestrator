@@ -1,0 +1,7 @@
+models:
+  - id: "1"
+    name: "minimal_tracker"
+    submission_id: "minimal-tracker-v2"
+    crunch_id: bird_tracker
+    cruncher_id: "test-cruncher"
+    desired_state: "RUNNING"

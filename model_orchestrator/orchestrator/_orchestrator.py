@@ -79,6 +79,17 @@ class Orchestrator:
                 model_runner = LocalModelRunner(
                     docker_network_name=runner_config.docker_network_name
                 )
+            elif runner_config.type == "phala":
+                logger.info("Configuring Phala TEE builder and runner...")
+
+                from ..infrastructure.phala import PhalaModelBuilder, PhalaModelRunner, PhalaMetrics
+
+                db_dir = str(Path(configuration.infrastructure.database.path).parent)
+                phala_metrics = PhalaMetrics(db_path=f"{db_dir}/phala_metrics.db")
+                self.phala_metrics = phala_metrics
+
+                model_builder = PhalaModelBuilder(runner_config, metrics=phala_metrics)
+                model_runner = PhalaModelRunner(runner_config, metrics=phala_metrics)
             else:
                 raise ValueError(f"Unknown runner type: {runner_config.type}")
 
@@ -391,5 +402,9 @@ class Orchestrator:
             logger.debug("Waiting for thread %s...", thread)
             thread.join()
         logger.debug("-- Processed threads")
+
+        # Print Phala metrics summary on shutdown
+        if hasattr(self, 'phala_metrics'):
+            logger.info(self.phala_metrics.summary())
 
 

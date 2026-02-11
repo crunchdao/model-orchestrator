@@ -50,7 +50,14 @@ class LocalRunnerInfrastructureConfig(_BaseConfig):
         return self.resource_storage_path_format.format(id=resource_id)
 
 
-RunnerInfrastructureConfig = Union[AwsRunnerInfrastructureConfig, LocalRunnerInfrastructureConfig]
+class PhalaRunnerInfrastructureConfig(_BaseConfig):
+    type: Literal["phala"] = "phala"
+    cluster_urls: list[str] = Field(..., description="List of CVM URL templates for the Phala cluster. Use <model-port> as placeholder for the port number.")
+    spawntee_port: int = Field(9010, description="Port where the spawntee API is exposed on the CVM")
+    request_timeout: int = Field(30, description="HTTP request timeout in seconds for spawntee API calls")
+
+
+RunnerInfrastructureConfig = Union[AwsRunnerInfrastructureConfig, LocalRunnerInfrastructureConfig, PhalaRunnerInfrastructureConfig]
 
 
 class RabbitMQPublisherInfrastructureConfig(_BaseConfig):
