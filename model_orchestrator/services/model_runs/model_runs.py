@@ -165,7 +165,24 @@ class ModelRunsService:
             get_logger().debug("Build is not required")
             model.set_docker_image(docker_image)
             self.model_runs_repository.save_model(model)
-            return self.run_service.run_model(model, crunch)
+
+            # Check if model container is already running (CVM state survives orchestrator restarts)
+            already_running = None
+            if hasattr(self.build_service, 'builder') and hasattr(self.build_service.builder, 'check_already_running'):
+                already_running = self.build_service.builder.check_already_running(model)
+
+            if already_running:
+                get_logger().info("Model %s already running in CVM — adopting (task=%s, port=%s)",
+                                 model.model_id, already_running.get("task_id"), already_running.get("external_port"))
+                task_id = already_running["task_id"]
+                model.update_builder_status(task_id, ModelRun.BuilderStatus.SUCCESS)
+                model.update_runner_status(task_id, ModelRun.RunnerStatus.INITIALIZING)
+                model.set_runner_info({"spawntee_task_id": task_id})
+                self.model_runs_repository.save_model(model)
+                self.state_subject.notify_runner_state_changed(model, None, model.runner_status)
+                return model
+            else:
+                return self.run_service.run_model(model, crunch)
 
     def stop_model(self, model_id: str):
         get_logger().info(f'Received stop model request id:{model_id}')

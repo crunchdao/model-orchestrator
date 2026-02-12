@@ -113,6 +113,29 @@ class PhalaModelBuilder(Builder):
             logger.warning("Could not check image for %s: %s", submission_id, e)
             return False, ""
 
+    def check_already_running(self, model: ModelRun) -> dict | None:
+        """
+        Check if a model's container is already running on the spawntee.
+
+        Queries /running_models and matches by submission_id.  When a match
+        is found, returns a dict with task_id, external_port, etc.
+        Returns None if the model is not currently running.
+        """
+        submission_id = model.code_submission_id
+        try:
+            running = self._client.get_running_models()
+            for rm in running:
+                if rm.get("submission_id") == submission_id:
+                    logger.info(
+                        "Model %s (submission=%s) already running: task=%s port=%s",
+                        model.model_id, submission_id,
+                        rm.get("task_id"), rm.get("external_port"),
+                    )
+                    return rm
+        except SpawnteeClientError as e:
+            logger.warning("Could not query running models: %s", e)
+        return None
+
     def load_status(self, model: ModelRun) -> ModelRun.BuilderStatus:
         """Poll the spawntee for a single model's build status."""
         return self.load_statuses([model])[model]
