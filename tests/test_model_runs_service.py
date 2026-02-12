@@ -3,12 +3,14 @@ import unittest
 from unittest.mock import Mock, MagicMock, ANY
 
 from model_orchestrator.entities import ModelRun, OrchestratorErrorType, ModelRunnerErrorType, CloudProviderErrorType, ModelInfo, CruncherOnchainInfo
+from model_orchestrator.services.builder import Builder
 from model_orchestrator.services.model_runs import ModelRunsService
 
 
 class TestModelRunsService(unittest.TestCase):
     def setUp(self):
-        self.builder = MagicMock()
+        self.builder = MagicMock(spec=Builder)
+        self.builder.check_already_running.return_value = None
         self.runner = MagicMock()
         self.state_subject_mock = MagicMock()
 

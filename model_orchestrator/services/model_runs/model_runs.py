@@ -167,9 +167,7 @@ class ModelRunsService:
             self.model_runs_repository.save_model(model)
 
             # Check if model container is already running (CVM state survives orchestrator restarts)
-            already_running = None
-            if hasattr(self.build_service, 'builder') and hasattr(self.build_service.builder, 'check_already_running'):
-                already_running = self.build_service.builder.check_already_running(model)
+            already_running = self.build_service.builder.check_already_running(model)
 
             if already_running:
                 get_logger().info("Model %s already running in CVM — adopting (task=%s, port=%s)",

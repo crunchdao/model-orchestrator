@@ -42,3 +42,11 @@ class Builder(abc.ABC):
     @abc.abstractmethod
     def is_built(self, model: ModelRun, crunch: Crunch) -> tuple[bool, str]:
         pass
+
+    def check_already_running(self, model: ModelRun) -> dict | None:
+        """Check if a model container is already running (e.g. CVM state surviving restarts).
+
+        Returns:
+            dict with task info if already running, None otherwise.
+        """
+        return None
