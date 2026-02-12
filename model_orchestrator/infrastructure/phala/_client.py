@@ -115,13 +115,23 @@ class SpawnteeClient:
         response = self._request("POST", "/build-model", json=payload)
         return response.json()
 
-    def start_model(self, task_id: str) -> dict:
+    def start_model(self, task_id: str, memory_mb: int | None = None, cpu_vcpus: int | None = None) -> dict:
         """
         POST /start-model — start a pre-built model container.
 
+        Args:
+            task_id: Spawntee task ID from a previous build.
+            memory_mb: Memory limit in MB (e.g. 512). None = no limit.
+            cpu_vcpus: CPU limit in vCPUs (e.g. 1). None = no limit.
+
         Returns dict with task_id, status, message.
         """
-        response = self._request("POST", "/start-model", json={"task_id": task_id})
+        payload: dict = {"task_id": task_id}
+        if memory_mb is not None:
+            payload["memory_mb"] = memory_mb
+        if cpu_vcpus is not None:
+            payload["cpu_vcpus"] = cpu_vcpus
+        response = self._request("POST", "/start-model", json=payload)
         return response.json()
 
     def stop_model(self, task_id: str) -> dict:

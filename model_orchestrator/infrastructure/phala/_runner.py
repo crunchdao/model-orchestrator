@@ -62,10 +62,12 @@ class PhalaModelRunner(Runner):
 
         The model must have been built first (builder_job_id is the spawntee task_id).
         The spawntee will start the container from the pre-built image.
+        Resource limits (memory, CPU) are read from the crunch's infrastructure
+        config — same as AWS ECS.
 
         Args:
             model: ModelRun whose builder_job_id is the spawntee task_id.
-            crunch: Crunch configuration (unused).
+            crunch: Crunch configuration with infrastructure.cpu_config limits.
 
         Returns:
             Tuple of (task_id, logs_arn, runner_info).
@@ -74,10 +76,20 @@ class PhalaModelRunner(Runner):
         if not task_id:
             raise ValueError(f"Model {model.model_id} has no builder_job_id — was it built?")
 
-        logger.info("Starting model on spawntee: task_id=%s, model=%s", task_id, model.model_id)
+        # Extract resource limits from crunch config (same source as AWS ECS)
+        memory_mb = None
+        cpu_vcpus = None
+        if crunch.infrastructure and crunch.infrastructure.cpu_config:
+            memory_mb = crunch.infrastructure.cpu_config.memory
+            cpu_vcpus = crunch.infrastructure.cpu_config.vcpus
+
+        logger.info(
+            "Starting model on spawntee: task_id=%s, model=%s, memory=%sMB, cpu=%svCPU",
+            task_id, model.model_id, memory_mb, cpu_vcpus,
+        )
 
         try:
-            result = self._client.start_model(task_id)
+            result = self._client.start_model(task_id, memory_mb=memory_mb, cpu_vcpus=cpu_vcpus)
         except SpawnteeClientError as e:
             logger.error("Failed to start model %s (task %s): %s", model.model_id, task_id, e)
             raise

@@ -27,3 +27,8 @@ watcher:
 crunches:
   - id: "bird_tracker"
     name: "bird tracker"
+    infrastructure:
+      zone: "phala"
+      cpu_config:
+        vcpus: 1
+        memory: 512
