@@ -103,13 +103,16 @@ class SpawnteeClient:
         """GET /keypair/{submission_id} — get public key for encryption."""
         return self._request("GET", f"/keypair/{submission_id}").json()
 
-    def build_model(self, submission_id: str) -> dict:
+    def build_model(self, submission_id: str, model_name: str | None = None) -> dict:
         """
         POST /build-model — submit a build task.
 
         Returns dict with task_id, status, message.
         """
-        response = self._request("POST", "/build-model", json={"submission_id": submission_id})
+        payload = {"submission_id": submission_id}
+        if model_name:
+            payload["model_name"] = model_name
+        response = self._request("POST", "/build-model", json=payload)
         return response.json()
 
     def start_model(self, task_id: str) -> dict:

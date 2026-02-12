@@ -74,7 +74,7 @@ class PhalaModelBuilder(Builder):
         logger.info("Submitting build to spawntee for submission_id=%s", submission_id)
 
         try:
-            result = self._client.build_model(submission_id)
+            result = self._client.build_model(submission_id, model_name=model.name)
         except SpawnteeClientError as e:
             logger.error("Failed to submit build for %s: %s", submission_id, e)
             raise
@@ -101,7 +101,13 @@ class PhalaModelBuilder(Builder):
             result = self._client.check_model_image(submission_id)
             exists = result.get("image_exists", False)
             image_name = result.get("image_name", "")
+            task_id = result.get("task_id", "")
             logger.debug("Image check for %s: exists=%s", submission_id, exists)
+
+            if exists and task_id:
+                # Set builder_job_id so run() can use it to call start-model
+                model.update_builder_status(task_id, ModelRun.BuilderStatus.SUCCESS)
+
             return exists, f"phala-tee://{image_name}" if exists else ""
         except SpawnteeClientError as e:
             logger.warning("Could not check image for %s: %s", submission_id, e)

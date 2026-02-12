@@ -1,7 +1,31 @@
 models:
   - id: "1"
-    name: "minimal_tracker"
-    submission_id: "minimal-tracker-v2"
+    name: "ewma_var"
+    submission_id: "30001"
+    crunch_id: bird_tracker
+    cruncher_id: "test-cruncher"
+    desired_state: "RUNNING"
+  - id: "2"
+    name: "quantile_regression_river"
+    submission_id: "30002"
+    crunch_id: bird_tracker
+    cruncher_id: "test-cruncher"
+    desired_state: "RUNNING"
+  - id: "3"
+    name: "ngboost"
+    submission_id: "30003"
+    crunch_id: bird_tracker
+    cruncher_id: "test-cruncher"
+    desired_state: "RUNNING"
+  - id: "4"
+    name: "auto_ets_sktime"
+    submission_id: "30004"
+    crunch_id: bird_tracker
+    cruncher_id: "test-cruncher"
+    desired_state: "RUNNING"
+  - id: "5"
+    name: "wealth_distribution"
+    submission_id: "30005"
     crunch_id: bird_tracker
     cruncher_id: "test-cruncher"
     desired_state: "RUNNING"
