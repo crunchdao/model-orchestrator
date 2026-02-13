@@ -323,11 +323,15 @@ class PhalaCluster:
 
     def _provision_new_runner(self):
         """
-        Provision a new runner CVM via the Phala Cloud API.
+        Provision a new runner CVM via the phala CLI.
 
         Creates a new CVM with MODE=runner, names it
         "{cluster_name}-runner-{N}", and makes it the new head.
         """
+        import json
+        import subprocess
+        import time
+
         if not self.phala_api_key:
             raise PhalaClusterError(
                 "Cannot provision new CVM: PHALA_API_KEY not set"
@@ -345,15 +349,6 @@ class PhalaCluster:
 
         logger.info("🆕 Provisioning CVM: %s", cvm_name)
 
-        # Read runner compose file
-        try:
-            with open(self.runner_compose_path) as f:
-                compose_content = f.read()
-        except FileNotFoundError:
-            raise PhalaClusterError(
-                f"Runner compose file not found: {self.runner_compose_path}"
-            )
-
         # Get registry URL for the runner's REGISTRY_URL env var
         registry_cvm = next(
             (c for c in self.cvms.values() if "registry" in c.mode), None
@@ -363,32 +358,64 @@ class PhalaCluster:
 
         registry_url = f"https://{registry_cvm.app_id}-{self.spawntee_port}.dstack-pha-{registry_cvm.node_name}.phala.network"
 
-        # Create CVM via Phala Cloud API
-        try:
-            headers = {"X-API-Key": self.phala_api_key}
-            payload = {
-                "name": cvm_name,
-                "compose": compose_content,
-                "env": {
-                    "REGISTRY_URL": registry_url,
-                },
-            }
-            response = requests.post(
-                f"{self.phala_api_url}/api/v1/cvms",
-                headers=headers,
-                json=payload,
-                timeout=30,
-            )
-            response.raise_for_status()
-            result = response.json()
-        except Exception as e:
-            raise PhalaClusterError(f"Phala API create CVM failed: {e}") from e
+        # Deploy via phala CLI (handles compose hashing, API format, etc.)
+        cmd = [
+            "phala", "deploy",
+            "--name", cvm_name,
+            "--compose", self.runner_compose_path,
+            "-e", f"REGISTRY_URL={registry_url}",
+            "-e", f"CAPACITY_THRESHOLD={os.environ.get('CAPACITY_THRESHOLD', '0.8')}",
+            "--json",
+            "--wait",
+        ]
 
-        new_app_id = result.get("app_id", "")
-        node_name = result.get("node_info", {}).get("name", "")
+        logger.info("  Running: %s", " ".join(cmd))
+
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=300,  # 5 minute timeout for deploy + wait
+                env={**os.environ, "PHALA_API_KEY": self.phala_api_key},
+            )
+        except subprocess.TimeoutExpired:
+            raise PhalaClusterError(f"phala deploy timed out for {cvm_name}")
+
+        if result.returncode != 0:
+            logger.error("  phala deploy stderr: %s", result.stderr)
+            raise PhalaClusterError(
+                f"phala deploy failed (rc={result.returncode}): {result.stderr}"
+            )
+
+        # Parse JSON output to get app_id and node info
+        try:
+            deploy_result = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            logger.warning("  Could not parse phala deploy output as JSON: %s", result.stdout[:500])
+            deploy_result = {}
+
+        new_app_id = deploy_result.get("app_id", "")
+        node_name = deploy_result.get("node_info", {}).get("name", "")
+
+        if not new_app_id:
+            # Fallback: re-discover from API to find the newly created CVM
+            logger.info("  No app_id in deploy output, re-discovering from API...")
+            old_cvms = set(self.cvms.keys())
+            self._discover_from_api()
+            new_ids = set(self.cvms.keys()) - old_cvms
+            if new_ids:
+                new_app_id = new_ids.pop()
+                node_name = self.cvms[new_app_id].node_name
+                logger.info("  Found new CVM via re-discovery: %s", new_app_id)
+            else:
+                raise PhalaClusterError(
+                    f"CVM {cvm_name} deployed but could not determine app_id"
+                )
+
         logger.info("  ✅ CVM created: %s (app_id=%s)", cvm_name, new_app_id)
 
-        # Wait for CVM to become healthy
+        # Build client and wait for healthy
         url_template = f"https://{new_app_id}-<model-port>.dstack-pha-{node_name}.phala.network"
         new_client = SpawnteeClient(
             cluster_url_template=url_template,
@@ -396,7 +423,6 @@ class PhalaCluster:
             timeout=self.request_timeout,
         )
 
-        import time
         max_wait = 180  # 3 minutes
         elapsed = 0
         interval = 10
