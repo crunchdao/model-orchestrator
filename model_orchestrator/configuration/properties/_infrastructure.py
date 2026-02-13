@@ -52,9 +52,12 @@ class LocalRunnerInfrastructureConfig(_BaseConfig):
 
 class PhalaRunnerInfrastructureConfig(_BaseConfig):
     type: Literal["phala"] = "phala"
-    cluster_urls: list[str] = Field(..., description="List of CVM URL templates for the Phala cluster. Use <model-port> as placeholder for the port number.")
+    cluster_urls: list[str] = Field(default_factory=list, description="Fallback CVM URL templates for local dev. Use <model-port> as placeholder for the port number.")
     spawntee_port: int = Field(9010, description="Port where the spawntee API is exposed on the CVM")
     request_timeout: int = Field(30, description="HTTP request timeout in seconds for spawntee API calls")
+    cluster_name: str = Field("", description="Name prefix for CVM discovery via Phala Cloud API (e.g. 'bird-tracker')")
+    phala_api_url: str = Field("https://cloud-api.phala.network", description="Phala Cloud API base URL")
+    runner_compose_path: str = Field("", description="Path to docker-compose.phala.runner.yml for auto-provisioning new runner CVMs")
 
 
 RunnerInfrastructureConfig = Union[AwsRunnerInfrastructureConfig, LocalRunnerInfrastructureConfig, PhalaRunnerInfrastructureConfig]
