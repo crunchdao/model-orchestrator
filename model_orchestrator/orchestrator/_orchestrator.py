@@ -83,13 +83,27 @@ class Orchestrator:
                 logger.info("Configuring Phala TEE builder and runner...")
 
                 from ..infrastructure.phala import PhalaModelBuilder, PhalaModelRunner, PhalaMetrics
+                from ..infrastructure.phala._cluster import PhalaCluster
 
                 db_dir = str(Path(configuration.infrastructure.database.path).parent)
                 phala_metrics = PhalaMetrics(db_path=f"{db_dir}/phala_metrics.db")
                 self.phala_metrics = phala_metrics
 
-                model_builder = PhalaModelBuilder(runner_config, metrics=phala_metrics)
-                model_runner = PhalaModelRunner(runner_config, metrics=phala_metrics)
+                # Initialize cluster: discovers CVMs from Phala API (or fallback URLs)
+                cluster = PhalaCluster(
+                    cluster_name=runner_config.cluster_name,
+                    spawntee_port=runner_config.spawntee_port,
+                    request_timeout=runner_config.request_timeout,
+                    phala_api_url=runner_config.phala_api_url,
+                    runner_compose_path=runner_config.runner_compose_path,
+                    fallback_urls=runner_config.cluster_urls,
+                )
+                cluster.discover()
+                cluster.rebuild_task_map()
+                self.phala_cluster = cluster
+
+                model_builder = PhalaModelBuilder(cluster, metrics=phala_metrics)
+                model_runner = PhalaModelRunner(cluster, metrics=phala_metrics)
             else:
                 raise ValueError(f"Unknown runner type: {runner_config.type}")
 
