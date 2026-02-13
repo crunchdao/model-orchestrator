@@ -234,6 +234,23 @@ class PhalaCluster:
             self.cvms[host_part] = cvm_info
             logger.info("  ✅ fallback-%d (%s) mode=%s", i, host_part, mode)
 
+    def _get_node_name(self, app_id: str) -> str:
+        """Look up a CVM's node name from the Phala API."""
+        try:
+            headers = {"X-API-Key": self.phala_api_key}
+            response = requests.get(
+                f"{self.phala_api_url}/api/v1/cvms",
+                headers=headers,
+                timeout=15,
+            )
+            response.raise_for_status()
+            for cvm in response.json():
+                if cvm.get("app_id") == app_id:
+                    return cvm.get("node_info", {}).get("name", "")
+        except Exception as e:
+            logger.warning("  Could not look up node_name for %s: %s", app_id, e)
+        return ""
+
     def _probe_mode(self, client: SpawnteeClient, label: str) -> str | None:
         """Probe a CVM's /health endpoint to determine its mode."""
         try:
@@ -388,30 +405,29 @@ class PhalaCluster:
                 f"phala deploy failed (rc={result.returncode}): {result.stderr}"
             )
 
-        # Parse JSON output to get app_id and node info
-        try:
-            deploy_result = json.loads(result.stdout)
-        except json.JSONDecodeError:
-            logger.warning("  Could not parse phala deploy output as JSON: %s", result.stdout[:500])
-            deploy_result = {}
+        # Parse JSON output to get app_id and node info.
+        # phala CLI may prefix JSON with text like "Provisioning CVM...",
+        # so we extract the first JSON object from the output.
+        deploy_result = {}
+        stdout = result.stdout.strip()
+        json_start = stdout.find("{")
+        if json_start >= 0:
+            try:
+                deploy_result = json.loads(stdout[json_start:])
+            except json.JSONDecodeError:
+                logger.warning("  Could not parse phala deploy JSON: %s", stdout[:500])
+        else:
+            logger.warning("  No JSON found in phala deploy output: %s", stdout[:500])
 
         new_app_id = deploy_result.get("app_id", "")
-        node_name = deploy_result.get("node_info", {}).get("name", "")
 
         if not new_app_id:
-            # Fallback: re-discover from API to find the newly created CVM
-            logger.info("  No app_id in deploy output, re-discovering from API...")
-            old_cvms = set(self.cvms.keys())
-            self._discover_from_api()
-            new_ids = set(self.cvms.keys()) - old_cvms
-            if new_ids:
-                new_app_id = new_ids.pop()
-                node_name = self.cvms[new_app_id].node_name
-                logger.info("  Found new CVM via re-discovery: %s", new_app_id)
-            else:
-                raise PhalaClusterError(
-                    f"CVM {cvm_name} deployed but could not determine app_id"
-                )
+            raise PhalaClusterError(
+                f"CVM {cvm_name} deployed but could not determine app_id from output"
+            )
+
+        # Get node_name from API (deploy output doesn't include it)
+        node_name = self._get_node_name(new_app_id)
 
         logger.info("  ✅ CVM created: %s (app_id=%s)", cvm_name, new_app_id)
 
