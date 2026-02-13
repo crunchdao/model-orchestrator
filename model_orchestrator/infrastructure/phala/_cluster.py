@@ -484,7 +484,7 @@ class PhalaCluster:
         cmd = [
             "phala", "deploy",
             "--name", cvm_name,
-            "--type", self.instance_type,
+            "--instance-type", self.instance_type,
             "--compose", self.runner_compose_path,
             "-e", f"REGISTRY_URL={registry_url}",
             "-e", f"CAPACITY_THRESHOLD={os.environ.get('CAPACITY_THRESHOLD', '0.8')}",
