@@ -97,6 +97,10 @@ class Orchestrator:
                     phala_api_url=runner_config.phala_api_url,
                     runner_compose_path=runner_config.runner_compose_path,
                     fallback_urls=runner_config.cluster_urls,
+                    instance_type=runner_config.instance_type,
+                    memory_per_model_mb=runner_config.memory_per_model_mb,
+                    provision_factor=runner_config.provision_factor,
+                    max_models=runner_config.max_models,
                 )
                 cluster.discover()
                 cluster.rebuild_task_map()

@@ -12,8 +12,17 @@ Source of truth:
     - Which models on which? → CVM itself (GET /running_models)
 
 The orchestrator keeps no persistent CVM or model-mapping state.
+
+Capacity planning:
+    max_models_per_cvm is calculated from the instance type's memory, a
+    system overhead reservation, and the configured memory_per_model_mb.
+    A new CVM is provisioned when the head reaches
+    (max_models_per_cvm * provision_factor) models, OR when the CVM itself
+    reports accepting_new_models=false (CAPACITY_THRESHOLD safety net).
+    A global max_models cap prevents unbounded cluster growth.
 """
 
+import math
 import os
 import logging
 
@@ -22,6 +31,21 @@ import requests
 from ._client import SpawnteeClient, SpawnteeClientError
 
 logger = logging.getLogger(__name__)
+
+# Phala instance type → memory in MB.
+# From `phala instance-types` (2026-02).
+INSTANCE_TYPE_MEMORY_MB: dict[str, int] = {
+    "tdx.small":    2048,
+    "tdx.medium":   4096,
+    "tdx.large":    8192,
+    "tdx.xlarge":  16384,
+    "tdx.2xlarge": 32768,
+    "tdx.4xlarge": 65536,
+    "tdx.8xlarge": 131072,
+}
+
+# Memory reserved for the OS, Docker daemon, spawn service, etc.
+SYSTEM_OVERHEAD_MB = 500
 
 # Default Phala Cloud API base URL
 DEFAULT_PHALA_API_URL = "https://cloud-api.phala.network"
@@ -69,6 +93,10 @@ class PhalaCluster:
         phala_api_url: str = "",
         runner_compose_path: str = "",
         fallback_urls: list[str] | None = None,
+        instance_type: str = "tdx.medium",
+        memory_per_model_mb: int = 1024,
+        provision_factor: float = 0.8,
+        max_models: int = 0,
     ):
         """
         Args:
@@ -81,6 +109,11 @@ class PhalaCluster:
             runner_compose_path: Path to docker-compose.phala.runner.yml for provisioning.
             fallback_urls: Optional URL templates for local dev (used when cluster_name
                           is empty or Phala API is unavailable).
+            instance_type: Phala CVM instance type for new runners (e.g. "tdx.medium").
+            memory_per_model_mb: Estimated memory per model container in MB.
+            provision_factor: Fraction of max_models_per_cvm at which to provision
+                            a new CVM (0.0–1.0).
+            max_models: Global cap on total models across the cluster. 0 = unlimited.
         """
         self.cluster_name = cluster_name
         self.spawntee_port = spawntee_port
@@ -89,6 +122,32 @@ class PhalaCluster:
         self.phala_api_key = os.environ.get("PHALA_API_KEY", "")
         self.runner_compose_path = runner_compose_path
         self._fallback_urls = fallback_urls or []
+
+        # Capacity planning
+        self.instance_type = instance_type
+        self.memory_per_model_mb = memory_per_model_mb
+        self.provision_factor = max(0.0, min(1.0, provision_factor))
+        self.max_models = max_models  # 0 = unlimited
+
+        instance_memory = INSTANCE_TYPE_MEMORY_MB.get(instance_type)
+        if instance_memory is None:
+            raise PhalaClusterError(
+                f"Unknown instance type '{instance_type}'. "
+                f"Known types: {', '.join(sorted(INSTANCE_TYPE_MEMORY_MB))}"
+            )
+
+        available_mb = instance_memory - SYSTEM_OVERHEAD_MB
+        self.max_models_per_cvm = max(1, math.floor(available_mb / memory_per_model_mb))
+        self.provision_threshold = max(1, math.floor(self.max_models_per_cvm * self.provision_factor))
+
+        logger.info(
+            "📐 Capacity planning: instance=%s (%d MB), overhead=%d MB, "
+            "per_model=%d MB → max_models_per_cvm=%d, provision_at=%d, "
+            "global_max=%s",
+            instance_type, instance_memory, SYSTEM_OVERHEAD_MB,
+            memory_per_model_mb, self.max_models_per_cvm, self.provision_threshold,
+            max_models or "unlimited",
+        )
 
         # Discovered CVMs: app_id → CVMInfo
         self.cvms: dict[str, CVMInfo] = {}
@@ -322,21 +381,67 @@ class PhalaCluster:
 
     # ─── Capacity management ───
 
+    def total_running_models(self) -> int:
+        """Count models across all CVMs based on the task routing map."""
+        return len(self.task_client_map)
+
+    def head_model_count(self) -> int:
+        """Count how many models are assigned to the current head CVM."""
+        if not self.head_id:
+            return 0
+        return sum(1 for app_id in self.task_client_map.values() if app_id == self.head_id)
+
     def ensure_capacity(self):
         """
         Check if the head CVM has capacity. If not, provision a new runner.
+
+        Decision logic (checked in order):
+        1. Global cap: if total_running_models >= max_models, refuse.
+        2. Orchestrator-side threshold: if head has >= provision_threshold
+           models, provision a new CVM.
+        3. CVM-side safety net: if the CVM itself reports
+           accepting_new_models=false (CAPACITY_THRESHOLD), provision.
 
         Called before each build to ensure we have somewhere to put the model.
         """
         if not self.head_id:
             raise PhalaClusterError("No head CVM available")
 
-        head = self.cvms[self.head_id]
-        if head.client.has_capacity():
-            return  # Head has room
+        # 1. Global cap
+        total = self.total_running_models()
+        if self.max_models and total >= self.max_models:
+            raise PhalaClusterError(
+                f"Global model cap reached ({total}/{self.max_models}). "
+                f"Cannot accept new models."
+            )
 
-        logger.info("📊 Head CVM %s is full, provisioning new runner...", head.name)
-        self._provision_new_runner()
+        head = self.cvms[self.head_id]
+        head_count = self.head_model_count()
+
+        # 2. Orchestrator-side threshold (calculated from instance type + memory per model)
+        if head_count >= self.provision_threshold:
+            logger.info(
+                "📊 Head CVM %s has %d/%d models (threshold=%d), provisioning new runner...",
+                head.name, head_count, self.max_models_per_cvm, self.provision_threshold,
+            )
+            self._provision_new_runner()
+            return
+
+        # 3. CVM-side safety net (disk/memory based CAPACITY_THRESHOLD)
+        if not head.client.has_capacity():
+            logger.info(
+                "📊 Head CVM %s reports no capacity (CAPACITY_THRESHOLD safety net), "
+                "provisioning new runner...",
+                head.name,
+            )
+            self._provision_new_runner()
+            return
+
+        logger.debug(
+            "✅ Head CVM %s has capacity: %d/%d models (threshold=%d, global=%d/%s)",
+            head.name, head_count, self.max_models_per_cvm, self.provision_threshold,
+            total, self.max_models or "∞",
+        )
 
     def _provision_new_runner(self):
         """
@@ -379,6 +484,7 @@ class PhalaCluster:
         cmd = [
             "phala", "deploy",
             "--name", cvm_name,
+            "--type", self.instance_type,
             "--compose", self.runner_compose_path,
             "-e", f"REGISTRY_URL={registry_url}",
             "-e", f"CAPACITY_THRESHOLD={os.environ.get('CAPACITY_THRESHOLD', '0.8')}",
