@@ -4,15 +4,24 @@ Phala TEE Model Runner.
 Delegates model execution to the remote spawntee service via HTTP.
 The spawntee starts pre-built Docker containers inside the TEE and
 exposes their gRPC services on dynamically allocated ports.
+
+Uses PhalaCluster for CVM routing:
+- run/stop/status operations route to the CVM that owns the task
 """
 
-from ...configuration.properties._infrastructure import PhalaRunnerInfrastructureConfig
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from ...entities import ModelRun
 from ...entities.crunch import Crunch
 from ...services import Runner
 from ...utils.logging_utils import get_logger
-from ._client import SpawnteeClient, SpawnteeClientError
+from ._client import SpawnteeClientError
 from ._metrics import PhalaMetrics
+
+if TYPE_CHECKING:
+    from ._cluster import PhalaCluster
 
 logger = get_logger()
 
@@ -34,23 +43,10 @@ class PhalaModelRunner(Runner):
     externally-mapped ports.
     """
 
-    def __init__(self, config: PhalaRunnerInfrastructureConfig, metrics: PhalaMetrics | None = None):
+    def __init__(self, cluster: PhalaCluster, metrics: PhalaMetrics | None = None):
         super().__init__()
-        self._config = config
+        self._cluster = cluster
         self._metrics = metrics
-        self._clients = [
-            SpawnteeClient(
-                cluster_url_template=url,
-                spawntee_port=config.spawntee_port,
-                timeout=config.request_timeout,
-            )
-            for url in config.cluster_urls
-        ]
-
-    @property
-    def _client(self) -> SpawnteeClient:
-        """Return the first spawntee client (single-cluster for now)."""
-        return self._clients[0]
 
     def create(self, crunch: Crunch) -> dict:
         """No infrastructure to create — the CVM is already running."""
@@ -60,10 +56,7 @@ class PhalaModelRunner(Runner):
         """
         Start a pre-built model container on the spawntee.
 
-        The model must have been built first (builder_job_id is the spawntee task_id).
-        The spawntee will start the container from the pre-built image.
-        Resource limits (memory, CPU) are read from the crunch's infrastructure
-        config — same as AWS ECS.
+        Routes to the CVM that built the model (via task_id → CVM mapping).
 
         Args:
             model: ModelRun whose builder_job_id is the spawntee task_id.
@@ -75,6 +68,9 @@ class PhalaModelRunner(Runner):
         task_id = model.builder_job_id
         if not task_id:
             raise ValueError(f"Model {model.model_id} has no builder_job_id — was it built?")
+
+        # Route to the CVM that owns this task
+        client = self._cluster.client_for_task(task_id)
 
         # Extract resource limits from crunch config (same source as AWS ECS)
         memory_mb = None
@@ -89,7 +85,7 @@ class PhalaModelRunner(Runner):
         )
 
         try:
-            result = self._client.start_model(task_id, memory_mb=memory_mb, cpu_vcpus=cpu_vcpus)
+            result = client.start_model(task_id, memory_mb=memory_mb, cpu_vcpus=cpu_vcpus)
         except SpawnteeClientError as e:
             logger.error("Failed to start model %s (task %s): %s", model.model_id, task_id, e)
             raise
@@ -108,9 +104,7 @@ class PhalaModelRunner(Runner):
         """
         Poll the spawntee for run statuses of the given models.
 
-        Each model's runner_job_id is the spawntee task_id.
-        When the start-model task completes, the task metadata contains
-        the container's port, which we use to construct the external gRPC URL.
+        Routes each poll to the correct CVM via the cluster's task map.
         """
         result = {}
         for model in models:
@@ -119,8 +113,9 @@ class PhalaModelRunner(Runner):
                 result[model] = (ModelRun.RunnerStatus.FAILED, '', 0)
                 continue
 
+            client = self._cluster.client_for_task(task_id)
             try:
-                task = self._client.get_task(task_id)
+                task = client.get_task(task_id)
                 spawntee_status = task.get("status", "failed")
                 status = _STATUS_MAP.get(spawntee_status, ModelRun.RunnerStatus.FAILED)
 
@@ -132,7 +127,7 @@ class PhalaModelRunner(Runner):
                 port = 0
 
                 if status == ModelRun.RunnerStatus.RUNNING:
-                    ip, port = self._extract_grpc_address(task)
+                    ip, port = self._extract_grpc_address(client, task)
 
                 # Check if the model was actually stopped via stop operation
                 if spawntee_status == "completed":
@@ -156,25 +151,26 @@ class PhalaModelRunner(Runner):
         """
         Stop a running model container on the spawntee.
 
-        The spawntee handles the async cleanup (stop container, remove network,
-        clean up model data, prune Docker resources).
+        Routes to the CVM that owns this task.
         """
         task_id = model.runner_job_id
         if not task_id:
             logger.warning("Cannot stop model %s — no runner_job_id", model.model_id)
             return ""
 
+        client = self._cluster.client_for_task(task_id)
+
         logger.info("Stopping model on spawntee: task_id=%s, model=%s", task_id, model.model_id)
 
         try:
-            result = self._client.stop_model(task_id)
+            result = client.stop_model(task_id)
             logger.info("Stop submitted: task_id=%s for model=%s", task_id, model.model_id)
             return result.get("task_id", task_id)
         except SpawnteeClientError as e:
             logger.error("Failed to stop model %s (task %s): %s", model.model_id, task_id, e)
             raise
 
-    def _extract_grpc_address(self, task: dict) -> tuple[str, int]:
+    def _extract_grpc_address(self, client, task: dict) -> tuple[str, int]:
         """
         Extract the external gRPC hostname and port from a spawntee task.
 
@@ -200,6 +196,6 @@ class PhalaModelRunner(Runner):
             return '', 0
 
         model_port = int(model_port)
-        hostname, port = self._client.model_grpc_url(model_port)
+        hostname, port = client.model_grpc_url(model_port)
         logger.debug("Model gRPC endpoint (from template): %s:%d (CVM port %d)", hostname, port, model_port)
         return hostname, port
