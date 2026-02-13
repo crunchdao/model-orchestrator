@@ -150,7 +150,7 @@ class PhalaCluster:
         logger.info("🔍 Discovering CVMs from Phala API (prefix=%s)...", self.cluster_name)
 
         try:
-            headers = {"Authorization": f"Bearer {self.phala_api_key}"}
+            headers = {"X-API-Key": self.phala_api_key}
             response = requests.get(
                 f"{self.phala_api_url}/api/v1/cvms",
                 headers=headers,
@@ -365,7 +365,7 @@ class PhalaCluster:
 
         # Create CVM via Phala Cloud API
         try:
-            headers = {"Authorization": f"Bearer {self.phala_api_key}"}
+            headers = {"X-API-Key": self.phala_api_key}
             payload = {
                 "name": cvm_name,
                 "compose": compose_content,
