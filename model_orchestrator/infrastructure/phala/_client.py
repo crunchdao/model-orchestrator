@@ -167,3 +167,24 @@ class SpawnteeClient:
         Returns dict with submission_id, image_exists, image_name.
         """
         return self._request("GET", f"/submission-image/{submission_id}").json()
+
+    def capacity(self) -> dict:
+        """
+        GET /capacity — get CVM resource capacity.
+
+        Returns dict with total_memory_mb, available_memory_mb, running_models,
+        accepting_new_models, capacity_threshold, etc.
+        """
+        return self._request("GET", "/capacity").json()
+
+    def has_capacity(self) -> bool:
+        """
+        Check if this CVM is accepting new models.
+
+        Returns False on any error (network, timeout, etc.) — fail-closed
+        means we won't send models to an unreachable CVM.
+        """
+        try:
+            return self.capacity().get("accepting_new_models", False)
+        except SpawnteeClientError:
+            return False
