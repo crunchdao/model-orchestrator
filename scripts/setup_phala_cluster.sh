@@ -398,18 +398,24 @@ echo "Getting compose_hash from Phala API..."
 COMPOSE_HASH=$(phala cvms get "$TEMP_RUNNER_APP_ID" --json --api-key "$PHALA_API_KEY" 2>/dev/null \
     | python3 -c "
 import sys, json
-data = json.load(sys.stdin)
-print(data.get('compose_hash', ''))
+try:
+    data = json.load(sys.stdin)
+    print(data.get('compose_hash', ''))
+except Exception:
+    pass
 " 2>/dev/null) || COMPOSE_HASH=""
 
 if [[ -z "$COMPOSE_HASH" ]]; then
     COMPOSE_HASH=$(phala cvms list --json --api-key "$PHALA_API_KEY" 2>/dev/null \
         | python3 -c "
 import sys, json
-for c in json.load(sys.stdin):
-    if c.get('app_id') == '$TEMP_RUNNER_APP_ID':
-        print(c.get('compose_hash', '')); break
-" 2>/dev/null)
+try:
+    for c in json.load(sys.stdin):
+        if c.get('app_id') == '$TEMP_RUNNER_APP_ID':
+            print(c.get('compose_hash', '')); break
+except Exception:
+    pass
+" 2>/dev/null) || COMPOSE_HASH=""
 fi
 
 if [[ -n "$COMPOSE_HASH" ]]; then
