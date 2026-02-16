@@ -278,10 +278,14 @@ EXISTING_CVMS=$(phala cvms list --json --api-key "$PHALA_API_KEY" 2>/dev/null \
     | python3 -c "
 import sys, json
 try:
-    cvms = json.load(sys.stdin)
-    matches = [c for c in cvms if c.get('name','').startswith('$CLUSTER_NAME')]
+    data = json.load(sys.stdin)
+    cvms = data.get('items', data) if isinstance(data, dict) else data
+    matches = [c for c in cvms if c.get('cvmName','').startswith('$CLUSTER_NAME') or c.get('name','').startswith('$CLUSTER_NAME')]
     for c in matches:
-        print(f\"  {c['name']}  app_id={c['app_id']}  status={c.get('status','?')}\")
+        name = c.get('cvmName') or c.get('name', '?')
+        app_id = c.get('appId') or c.get('app_id', '?')
+        status = c.get('status', '?')
+        print(f'  {name}  app_id={app_id}  status={status}')
     if not matches:
         print('  (none)')
 except: print('  (could not parse)')
@@ -296,31 +300,46 @@ if [[ "$EXISTING_CVMS" != *"(none)"* && "$EXISTING_CVMS" != *"could not"* ]]; th
     fi
 fi
 
-echo ""
-echo "Deploying registry CVM: $REGISTRY_NAME"
-echo "  Compose: spawntee/docker-compose.phala.debug.yml"
-echo "  Instance: $INSTANCE_TYPE"
-echo ""
+# Check if registry CVM already exists
+REGISTRY_APP_ID=$(phala cvms list --json --api-key "$PHALA_API_KEY" 2>/dev/null \
+    | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+cvms = data.get('items', data) if isinstance(data, dict) else data
+for c in cvms:
+    name = c.get('cvmName') or c.get('name', '')
+    if name == '$REGISTRY_NAME' and c.get('status') == 'running':
+        print(c.get('appId') or c.get('app_id', '')); break
+" 2>/dev/null) || REGISTRY_APP_ID=""
 
-REGISTRY_DEPLOY_OUT=$(phala deploy \
-    --name "$REGISTRY_NAME" \
-    --instance-type "$INSTANCE_TYPE" \
-    --compose "$PHALA_ROOT/spawntee/docker-compose.phala.debug.yml" \
-    -e "AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID" \
-    -e "AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY" \
-    -e "AWS_REGION=$AWS_REGION" \
-    -e "SPAWNTEE_API_TOKEN=$SPAWNTEE_API_TOKEN" \
-    --api-key "$PHALA_API_KEY" \
-    --json \
-    --wait \
-    2>&1) || {
-    err "Registry CVM deploy failed"
-    echo "$REGISTRY_DEPLOY_OUT"
-    exit 1
-}
+if [[ -n "$REGISTRY_APP_ID" ]]; then
+    info "Registry CVM already exists: app_id=$REGISTRY_APP_ID (reusing)"
+else
+    echo ""
+    echo "Deploying registry CVM: $REGISTRY_NAME"
+    echo "  Compose: spawntee/docker-compose.phala.debug.yml"
+    echo "  Instance: $INSTANCE_TYPE"
+    echo ""
 
-# Parse app_id from deploy output
-REGISTRY_APP_ID=$(echo "$REGISTRY_DEPLOY_OUT" | python3 -c "
+    REGISTRY_DEPLOY_OUT=$(phala deploy \
+        --name "$REGISTRY_NAME" \
+        --instance-type "$INSTANCE_TYPE" \
+        --compose "$PHALA_ROOT/spawntee/docker-compose.phala.debug.yml" \
+        -e "AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID" \
+        -e "AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY" \
+        -e "AWS_REGION=$AWS_REGION" \
+        -e "SPAWNTEE_API_TOKEN=$SPAWNTEE_API_TOKEN" \
+        --api-key "$PHALA_API_KEY" \
+        --json \
+        --wait \
+        2>&1) || {
+        err "Registry CVM deploy failed"
+        echo "$REGISTRY_DEPLOY_OUT"
+        exit 1
+    }
+
+    # Parse app_id from deploy output
+    REGISTRY_APP_ID=$(echo "$REGISTRY_DEPLOY_OUT" | python3 -c "
 import sys, json
 text = sys.stdin.read()
 idx = text.find('{')
@@ -329,22 +348,26 @@ if idx >= 0:
     print(obj.get('app_id', ''))
 " 2>/dev/null)
 
-if [[ -z "$REGISTRY_APP_ID" ]]; then
-    warn "Could not parse app_id from deploy output. Searching by name..."
-    REGISTRY_APP_ID=$(phala cvms list --json --api-key "$PHALA_API_KEY" 2>/dev/null \
-        | python3 -c "
+    if [[ -z "$REGISTRY_APP_ID" ]]; then
+        warn "Could not parse app_id from deploy output. Searching by name..."
+        REGISTRY_APP_ID=$(phala cvms list --json --api-key "$PHALA_API_KEY" 2>/dev/null \
+            | python3 -c "
 import sys, json
-for c in json.load(sys.stdin):
-    if c.get('name') == '$REGISTRY_NAME' and c.get('status') == 'running':
-        print(c['app_id']); break
+data = json.load(sys.stdin)
+cvms = data.get('items', data) if isinstance(data, dict) else data
+for c in cvms:
+    name = c.get('cvmName') or c.get('name', '')
+    if name == '$REGISTRY_NAME' and c.get('status') == 'running':
+        print(c.get('appId') or c.get('app_id', '')); break
 " 2>/dev/null)
-fi
+    fi
 
-if [[ -z "$REGISTRY_APP_ID" ]]; then
-    err "Could not determine registry CVM app_id. Check 'phala cvms list'."
-    exit 1
+    if [[ -z "$REGISTRY_APP_ID" ]]; then
+        err "Could not determine registry CVM app_id. Check 'phala cvms list'."
+        exit 1
+    fi
+    info "Registry CVM deployed: app_id=$REGISTRY_APP_ID"
 fi
-info "Registry CVM deployed: app_id=$REGISTRY_APP_ID"
 
 # Get node_name for URL construction
 REGISTRY_NODE=$(phala cvms get "$REGISTRY_APP_ID" --json --api-key "$PHALA_API_KEY" 2>/dev/null \
@@ -425,9 +448,12 @@ if [[ -z "$TEMP_RUNNER_APP_ID" ]]; then
     TEMP_RUNNER_APP_ID=$(phala cvms list --json --api-key "$PHALA_API_KEY" 2>/dev/null \
         | python3 -c "
 import sys, json
-for c in json.load(sys.stdin):
-    if c.get('name') == '$TEMP_RUNNER_NAME':
-        print(c['app_id']); break
+data = json.load(sys.stdin)
+cvms = data.get('items', data) if isinstance(data, dict) else data
+for c in cvms:
+    name = c.get('cvmName') or c.get('name', '')
+    if name == '$TEMP_RUNNER_NAME':
+        print(c.get('appId') or c.get('app_id', '')); break
 " 2>/dev/null)
 fi
 
@@ -455,9 +481,12 @@ if [[ -z "$COMPOSE_HASH" ]]; then
         | python3 -c "
 import sys, json
 try:
-    for c in json.load(sys.stdin):
-        if c.get('app_id') == '$TEMP_RUNNER_APP_ID':
-            print(c.get('compose_hash', '')); break
+    data = json.load(sys.stdin)
+    cvms = data.get('items', data) if isinstance(data, dict) else data
+    for c in cvms:
+        app_id = c.get('appId') or c.get('app_id', '')
+        if app_id == '$TEMP_RUNNER_APP_ID':
+            print(c.get('compose_hash') or c.get('composeHash', '')); break
 except Exception:
     pass
 " 2>/dev/null) || COMPOSE_HASH=""
