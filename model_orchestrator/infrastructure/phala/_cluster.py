@@ -95,7 +95,6 @@ class PhalaCluster:
         phala_api_url: str = "",
         registry_compose_path: str = "",
         runner_compose_path: str = "",
-        fallback_urls: list[str] | None = None,
         instance_type: str = "tdx.medium",
         memory_per_model_mb: int = 1024,
         provision_factor: float = 0.8,
@@ -111,8 +110,6 @@ class PhalaCluster:
             phala_api_url: Phala Cloud API base URL.
             registry_compose_path: Path to docker-compose.phala.registry.yml for deploying/upgrading registry.
             runner_compose_path: Path to docker-compose.phala.runner.yml for provisioning runners.
-            fallback_urls: Optional URL templates for local dev (used when cluster_name
-                          is empty or Phala API is unavailable).
             instance_type: Phala CVM instance type for new runners (e.g. "tdx.medium").
             memory_per_model_mb: Estimated memory per model container in MB.
             provision_factor: Fraction of max_models_per_cvm at which to provision
@@ -124,10 +121,9 @@ class PhalaCluster:
         self.request_timeout = request_timeout
         self.phala_api_url = phala_api_url or DEFAULT_PHALA_API_URL
         self.phala_api_key = os.environ.get("PHALA_API_KEY", "")
+        self.spawntee_api_token = os.environ.get("SPAWNTEE_API_TOKEN", "")
         self.registry_compose_path = registry_compose_path
         self.runner_compose_path = runner_compose_path
-        self._fallback_urls = fallback_urls or []
-
         # Capacity planning
         self.instance_type = instance_type
         self.memory_per_model_mb = memory_per_model_mb
@@ -170,19 +166,12 @@ class PhalaCluster:
     # ─── Discovery ───
 
     def discover(self):
-        """
-        Discover CVMs from the Phala Cloud API and probe each one.
-
-        Falls back to configured URLs if cluster_name is empty or
-        the Phala API is unavailable (local dev).
-        """
-        if self.cluster_name and self.phala_api_key:
-            self._discover_from_api()
-        elif self._fallback_urls:
-            self._discover_from_fallback()
-        else:
-            logger.warning("⚠️ No cluster_name/API key and no fallback URLs — no CVMs discovered")
+        """Discover CVMs from the Phala Cloud API and probe each one."""
+        if not self.cluster_name or not self.phala_api_key:
+            logger.warning("⚠️ No cluster_name or API key configured — no CVMs discovered")
             return
+
+        self._discover_from_api()
 
         if not self.cvms:
             logger.warning("⚠️ No CVMs discovered")
@@ -228,9 +217,6 @@ class PhalaCluster:
             all_cvms = response.json()
         except Exception as e:
             logger.error("❌ Phala API request failed: %s", e)
-            if self._fallback_urls:
-                logger.info("  Falling back to configured URLs")
-                self._discover_from_fallback()
             return
 
         # Filter by name prefix
@@ -254,6 +240,7 @@ class PhalaCluster:
                 cluster_url_template=url_template,
                 spawntee_port=self.spawntee_port,
                 timeout=self.request_timeout,
+                api_token=self.spawntee_api_token,
             )
 
             # Probe health to get mode
@@ -270,37 +257,6 @@ class PhalaCluster:
             )
             self.cvms[app_id] = cvm_info
             logger.info("  ✅ %s (%s) mode=%s", name, app_id, mode)
-
-    def _discover_from_fallback(self):
-        """Build clients from configured fallback URLs (local dev / no Phala API)."""
-        logger.info("🔍 Discovering CVMs from fallback URLs (%d configured)...", len(self._fallback_urls))
-
-        for i, url_template in enumerate(self._fallback_urls):
-            client = SpawnteeClient(
-                cluster_url_template=url_template,
-                spawntee_port=self.spawntee_port,
-                timeout=self.request_timeout,
-            )
-
-            mode = self._probe_mode(client, f"fallback-{i}")
-            if mode is None:
-                continue
-
-            # Extract a pseudo app_id from the URL
-            # e.g. "https://abc123-<model-port>.dstack..." → "abc123"
-            try:
-                host_part = url_template.split("//")[1].split("-<model-port>")[0]
-            except (IndexError, ValueError):
-                host_part = f"fallback-{i}"
-
-            cvm_info = CVMInfo(
-                app_id=host_part,
-                name=f"fallback-{i}",
-                client=client,
-                mode=mode,
-            )
-            self.cvms[host_part] = cvm_info
-            logger.info("  ✅ fallback-%d (%s) mode=%s", i, host_part, mode)
 
     def _get_node_name(self, app_id: str) -> str:
         """Look up a CVM's node name from the Phala API."""
@@ -512,9 +468,10 @@ class PhalaCluster:
             "--compose", self.runner_compose_path,
             "-e", f"REGISTRY_URL={registry_url}",
             "-e", f"CAPACITY_THRESHOLD={os.environ.get('CAPACITY_THRESHOLD', '0.8')}",
-            "--json",
-            "--wait",
         ]
+        if self.spawntee_api_token:
+            cmd.extend(["-e", f"SPAWNTEE_API_TOKEN={self.spawntee_api_token}"])
+        cmd.extend(["--json", "--wait"])
 
         logger.info("  Running: %s", " ".join(cmd))
 
@@ -571,6 +528,7 @@ class PhalaCluster:
             cluster_url_template=url_template,
             spawntee_port=self.spawntee_port,
             timeout=self.request_timeout,
+            api_token=self.spawntee_api_token,
         )
 
         max_wait = 180  # 3 minutes

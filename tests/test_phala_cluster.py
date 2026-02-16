@@ -32,42 +32,6 @@ def mock_client_factory():
     return _make
 
 
-class TestDiscoveryFallback:
-    """Test CVM discovery using fallback URLs (no Phala API)."""
-
-    def test_discover_single_cvm(self, mock_client_factory):
-        cluster = PhalaCluster(
-            cluster_name="",
-            fallback_urls=["https://abc123-<model-port>.dstack-pha-prod10.phala.network"],
-        )
-
-        mock_client = mock_client_factory(mode="registry+runner", has_capacity=True)
-        with patch.object(SpawnteeClient, "__new__", return_value=mock_client):
-            cluster.discover()
-
-        assert len(cluster.cvms) == 1
-        assert cluster.head_id is not None
-
-    def test_discover_no_urls(self):
-        cluster = PhalaCluster(cluster_name="", fallback_urls=[])
-        cluster.discover()
-        assert len(cluster.cvms) == 0
-        assert cluster.head_id is None
-
-    def test_unreachable_cvm_skipped(self):
-        cluster = PhalaCluster(
-            cluster_name="",
-            fallback_urls=["https://dead-<model-port>.example.com"],
-        )
-
-        mock_client = MagicMock(spec=SpawnteeClient)
-        mock_client.health.side_effect = SpawnteeClientError("Connection refused")
-        with patch.object(SpawnteeClient, "__new__", return_value=mock_client):
-            cluster.discover()
-
-        assert len(cluster.cvms) == 0
-
-
 class TestDiscoveryFromAPI:
     """Test CVM discovery via Phala Cloud API."""
 

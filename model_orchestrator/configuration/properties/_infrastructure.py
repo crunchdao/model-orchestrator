@@ -52,7 +52,6 @@ class LocalRunnerInfrastructureConfig(_BaseConfig):
 
 class PhalaRunnerInfrastructureConfig(_BaseConfig):
     type: Literal["phala"] = "phala"
-    cluster_urls: list[str] = Field(default_factory=list, description="Fallback CVM URL templates for local dev. Use <model-port> as placeholder for the port number.")
     spawntee_port: int = Field(9010, description="Port where the spawntee API is exposed on the CVM")
     request_timeout: int = Field(30, description="HTTP request timeout in seconds for spawntee API calls")
     cluster_name: str = Field("", description="Name prefix for CVM discovery via Phala Cloud API (e.g. 'bird-tracker')")

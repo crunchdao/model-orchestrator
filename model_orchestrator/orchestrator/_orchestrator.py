@@ -89,7 +89,7 @@ class Orchestrator:
                 phala_metrics = PhalaMetrics(db_path=f"{db_dir}/phala_metrics.db")
                 self.phala_metrics = phala_metrics
 
-                # Initialize cluster: discovers CVMs from Phala API (or fallback URLs)
+                # Initialize cluster: discovers CVMs from Phala API
                 cluster = PhalaCluster(
                     cluster_name=runner_config.cluster_name,
                     spawntee_port=runner_config.spawntee_port,
@@ -97,7 +97,6 @@ class Orchestrator:
                     phala_api_url=runner_config.phala_api_url,
                     registry_compose_path=runner_config.registry_compose_path,
                     runner_compose_path=runner_config.runner_compose_path,
-                    fallback_urls=runner_config.cluster_urls,
                     instance_type=runner_config.instance_type,
                     memory_per_model_mb=runner_config.memory_per_model_mb,
                     provision_factor=runner_config.provision_factor,
