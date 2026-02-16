@@ -25,6 +25,7 @@ Capacity planning:
 import math
 import os
 import logging
+import uuid
 
 import requests
 
@@ -463,10 +464,10 @@ class PhalaCluster:
                 "Cannot provision new CVM: runner_compose_path not configured"
             )
 
-        # Determine runner number
-        existing_runners = [c for c in self.cvms.values() if c.mode == "runner"]
-        runner_num = len(existing_runners) + 1
-        cvm_name = f"{self.cluster_name}-runner-{runner_num:03d}"
+        # Generate a unique runner name using a short UUID to avoid collisions
+        # with CVMs that may still exist on the platform but are no longer tracked
+        short_id = uuid.uuid4().hex[:8]
+        cvm_name = f"{self.cluster_name}-runner-{short_id}"
 
         logger.info("🆕 Provisioning CVM: %s", cvm_name)
 
