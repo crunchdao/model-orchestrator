@@ -25,6 +25,7 @@ Capacity planning:
 import math
 import os
 import logging
+import threading
 import uuid
 
 import requests
@@ -149,6 +150,10 @@ class PhalaCluster:
             memory_per_model_mb, self.max_models_per_cvm, self.provision_threshold,
             max_models or "unlimited",
         )
+
+        # Lock protecting cvms, head_id, and task_client_map against
+        # concurrent mutation (e.g. ensure_capacity racing with register_task).
+        self._lock = threading.Lock()
 
         # Discovered CVMs: app_id → CVMInfo
         self.cvms: dict[str, CVMInfo] = {}
@@ -330,6 +335,10 @@ class PhalaCluster:
 
         Called on startup to recover task routing after an orchestrator restart.
         """
+        with self._lock:
+            self._rebuild_task_map_unlocked()
+
+    def _rebuild_task_map_unlocked(self):
         self.task_client_map.clear()
         for app_id, cvm in self.cvms.items():
             try:
@@ -347,7 +356,8 @@ class PhalaCluster:
 
     def register_task(self, task_id: str, app_id: str):
         """Record which CVM owns a task (called after build/start)."""
-        self.task_client_map[task_id] = app_id
+        with self._lock:
+            self.task_client_map[task_id] = app_id
 
     # ─── Client access ───
 
@@ -357,9 +367,10 @@ class PhalaCluster:
 
         Raises PhalaClusterError if no head is set.
         """
-        if not self.head_id or self.head_id not in self.cvms:
-            raise PhalaClusterError("No head CVM available")
-        return self.cvms[self.head_id].client
+        with self._lock:
+            if not self.head_id or self.head_id not in self.cvms:
+                raise PhalaClusterError("No head CVM available")
+            return self.cvms[self.head_id].client
 
     def client_for_task(self, task_id: str) -> SpawnteeClient:
         """
@@ -368,16 +379,18 @@ class PhalaCluster:
         Falls back to head client if the task is not in the map
         (e.g. first poll after build, before map is updated).
         """
-        app_id = self.task_client_map.get(task_id)
-        if app_id and app_id in self.cvms:
-            return self.cvms[app_id].client
+        with self._lock:
+            app_id = self.task_client_map.get(task_id)
+            if app_id and app_id in self.cvms:
+                return self.cvms[app_id].client
         # Fallback: try all CVMs (task might exist on a CVM we haven't mapped yet)
         logger.debug("Task %s not in map, falling back to scan", task_id)
         return self.head_client()
 
     def all_clients(self) -> list[tuple[str, SpawnteeClient]]:
         """Return all (app_id, client) pairs for scanning operations."""
-        return [(app_id, cvm.client) for app_id, cvm in self.cvms.items()]
+        with self._lock:
+            return [(app_id, cvm.client) for app_id, cvm in self.cvms.items()]
 
     # ─── Capacity management ───
 
@@ -403,45 +416,49 @@ class PhalaCluster:
            accepting_new_models=false (CAPACITY_THRESHOLD), provision.
 
         Called before each build to ensure we have somewhere to put the model.
+
+        Thread-safe: the lock is held for the entire check-and-provision
+        sequence so two threads can't both decide to provision simultaneously.
         """
-        if not self.head_id:
-            raise PhalaClusterError("No head CVM available")
+        with self._lock:
+            if not self.head_id:
+                raise PhalaClusterError("No head CVM available")
 
-        # 1. Global cap
-        total = self.total_running_models()
-        if self.max_models and total >= self.max_models:
-            raise PhalaClusterError(
-                f"Global model cap reached ({total}/{self.max_models}). "
-                f"Cannot accept new models."
-            )
+            # 1. Global cap
+            total = len(self.task_client_map)
+            if self.max_models and total >= self.max_models:
+                raise PhalaClusterError(
+                    f"Global model cap reached ({total}/{self.max_models}). "
+                    f"Cannot accept new models."
+                )
 
-        head = self.cvms[self.head_id]
-        head_count = self.head_model_count()
+            head = self.cvms[self.head_id]
+            head_count = sum(1 for aid in self.task_client_map.values() if aid == self.head_id)
 
-        # 2. Orchestrator-side threshold (calculated from instance type + memory per model)
-        if head_count >= self.provision_threshold:
-            logger.info(
-                "📊 Head CVM %s has %d/%d models (threshold=%d), provisioning new runner...",
+            # 2. Orchestrator-side threshold (calculated from instance type + memory per model)
+            if head_count >= self.provision_threshold:
+                logger.info(
+                    "📊 Head CVM %s has %d/%d models (threshold=%d), provisioning new runner...",
+                    head.name, head_count, self.max_models_per_cvm, self.provision_threshold,
+                )
+                self._provision_new_runner()
+                return
+
+            # 3. CVM-side safety net (disk/memory based CAPACITY_THRESHOLD)
+            if not head.client.has_capacity():
+                logger.info(
+                    "📊 Head CVM %s reports no capacity (CAPACITY_THRESHOLD safety net), "
+                    "provisioning new runner...",
+                    head.name,
+                )
+                self._provision_new_runner()
+                return
+
+            logger.debug(
+                "✅ Head CVM %s has capacity: %d/%d models (threshold=%d, global=%d/%s)",
                 head.name, head_count, self.max_models_per_cvm, self.provision_threshold,
+                total, self.max_models or "∞",
             )
-            self._provision_new_runner()
-            return
-
-        # 3. CVM-side safety net (disk/memory based CAPACITY_THRESHOLD)
-        if not head.client.has_capacity():
-            logger.info(
-                "📊 Head CVM %s reports no capacity (CAPACITY_THRESHOLD safety net), "
-                "provisioning new runner...",
-                head.name,
-            )
-            self._provision_new_runner()
-            return
-
-        logger.debug(
-            "✅ Head CVM %s has capacity: %d/%d models (threshold=%d, global=%d/%s)",
-            head.name, head_count, self.max_models_per_cvm, self.provision_threshold,
-            total, self.max_models or "∞",
-        )
 
     def _provision_new_runner(self):
         """
