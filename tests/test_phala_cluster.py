@@ -135,6 +135,66 @@ class TestDiscoveryFromAPI:
         assert "aaa" in cluster.cvms
 
 
+class TestGetNodeName:
+    """Test _get_node_name fetches a single CVM by ID."""
+
+    def test_fetches_single_cvm_by_id(self):
+        cluster = PhalaCluster(
+            cluster_name="test",
+            phala_api_url="https://mock-api",
+        )
+        cluster.phala_api_key = "test-key"
+
+        cvm_response = {
+            "app_id": "abc123",
+            "name": "test-runner-001",
+            "status": "running",
+            "node_info": {"name": "prod10"},
+        }
+
+        with patch("requests.get") as mock_get:
+            mock_get.return_value = MagicMock(status_code=200, json=lambda: cvm_response)
+            mock_get.return_value.raise_for_status = MagicMock()
+            result = cluster._get_node_name("abc123")
+
+        assert result == "prod10"
+        # Verify it called the single-CVM endpoint, not the list endpoint
+        mock_get.assert_called_once_with(
+            "https://mock-api/api/v1/cvms/abc123",
+            headers={"X-API-Key": "test-key"},
+            timeout=15,
+        )
+
+    def test_returns_empty_on_missing_node_info(self):
+        cluster = PhalaCluster(
+            cluster_name="test",
+            phala_api_url="https://mock-api",
+        )
+        cluster.phala_api_key = "test-key"
+
+        cvm_response = {"app_id": "abc123", "name": "test-runner-001", "status": "running"}
+
+        with patch("requests.get") as mock_get:
+            mock_get.return_value = MagicMock(status_code=200, json=lambda: cvm_response)
+            mock_get.return_value.raise_for_status = MagicMock()
+            result = cluster._get_node_name("abc123")
+
+        assert result == ""
+
+    def test_returns_empty_on_api_error(self):
+        cluster = PhalaCluster(
+            cluster_name="test",
+            phala_api_url="https://mock-api",
+        )
+        cluster.phala_api_key = "test-key"
+
+        with patch("requests.get") as mock_get:
+            mock_get.side_effect = Exception("Connection refused")
+            result = cluster._get_node_name("abc123")
+
+        assert result == ""
+
+
 class TestHeadTracking:
     """Test head CVM selection based on capacity."""
 

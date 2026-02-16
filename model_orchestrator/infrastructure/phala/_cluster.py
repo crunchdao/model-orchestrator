@@ -298,14 +298,13 @@ class PhalaCluster:
         try:
             headers = {"X-API-Key": self.phala_api_key}
             response = requests.get(
-                f"{self.phala_api_url}/api/v1/cvms",
+                f"{self.phala_api_url}/api/v1/cvms/{app_id}",
                 headers=headers,
                 timeout=15,
             )
             response.raise_for_status()
-            for cvm in response.json():
-                if cvm.get("app_id") == app_id:
-                    return cvm.get("node_info", {}).get("name", "")
+            cvm = response.json()
+            return cvm.get("node_info", {}).get("name", "")
         except Exception as e:
             logger.warning("  Could not look up node_name for %s: %s", app_id, e)
         return ""
@@ -534,6 +533,10 @@ class PhalaCluster:
 
         # Get node_name from API (deploy output doesn't include it)
         node_name = self._get_node_name(new_app_id)
+        if not node_name:
+            raise PhalaClusterError(
+                f"CVM {cvm_name} deployed (app_id={new_app_id}) but could not determine node_name from API"
+            )
 
         logger.info("  ✅ CVM created: %s (app_id=%s)", cvm_name, new_app_id)
 
