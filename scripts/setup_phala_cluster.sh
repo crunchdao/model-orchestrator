@@ -515,6 +515,8 @@ if [[ -z "$COMPOSE_HASH" ]]; then
     echo "  You must set it manually later."
 else
     echo "Upgrading registry CVM with APPROVED_COMPOSE_HASH..."
+    # Note: --wait is omitted because the Phala CLI has a UUID validation bug
+    # when polling upgrade status. We poll the health endpoint manually instead.
     phala deploy \
         --cvm-id "$REGISTRY_APP_ID" \
         --compose "$PHALA_ROOT/spawntee/docker-compose.phala.debug.yml" \
@@ -524,7 +526,6 @@ else
         -e "SPAWNTEE_API_TOKEN=$SPAWNTEE_API_TOKEN" \
         -e "APPROVED_COMPOSE_HASH=$COMPOSE_HASH" \
         --api-key "$PHALA_API_KEY" \
-        --wait \
         2>&1 || {
         err "Failed to upgrade registry with APPROVED_COMPOSE_HASH"
         echo "  Do it manually:"
@@ -534,13 +535,19 @@ else
     # Wait for registry to come back
     echo "Waiting for registry to restart..."
     sleep 15
+    UPGRADE_HEALTHY=false
     for i in $(seq 1 20); do
         if curl -sf "$REGISTRY_URL/health" >/dev/null 2>&1; then
+            UPGRADE_HEALTHY=true
             info "Registry is back up with APPROVED_COMPOSE_HASH set"
             break
         fi
+        echo "  attempt $i/20..."
         sleep 10
     done
+    if [[ "$UPGRADE_HEALTHY" != true ]]; then
+        warn "Registry did not become healthy after upgrade. Check manually: $REGISTRY_URL/health"
+    fi
 fi
 
 # ── Phase 8: Write orchestrator .env ──────────────────────────
