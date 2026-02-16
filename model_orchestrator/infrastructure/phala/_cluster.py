@@ -518,7 +518,7 @@ class PhalaCluster:
         json_start = stdout.find("{")
         if json_start >= 0:
             try:
-                deploy_result = json.loads(stdout[json_start:])
+                deploy_result, _ = json.JSONDecoder().raw_decode(stdout[json_start:])
             except json.JSONDecodeError:
                 logger.warning("  Could not parse phala deploy JSON: %s", stdout[:500])
         else:
