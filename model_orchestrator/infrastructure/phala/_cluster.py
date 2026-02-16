@@ -494,6 +494,10 @@ class PhalaCluster:
         )
         if not registry_cvm:
             raise PhalaClusterError("No registry CVM found — cannot set REGISTRY_URL for runner")
+        if not registry_cvm.node_name:
+            raise PhalaClusterError(
+                f"Registry CVM {registry_cvm.name} has no node_name — cannot construct REGISTRY_URL"
+            )
 
         registry_url = f"https://{registry_cvm.app_id}-{self.spawntee_port}.dstack-pha-{registry_cvm.node_name}.phala.network"
 
