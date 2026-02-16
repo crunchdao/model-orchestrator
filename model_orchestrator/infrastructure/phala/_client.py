@@ -34,19 +34,23 @@ class SpawnteeClient:
         https://<hash>-<port>.<domain>
     """
 
-    def __init__(self, cluster_url_template: str, spawntee_port: int = 9010, timeout: int = 30):
+    def __init__(self, cluster_url_template: str, spawntee_port: int = 9010, timeout: int = 30, api_token: str = ""):
         """
         Args:
             cluster_url_template: CVM URL template with <model-port> placeholder,
                 e.g. "https://abc123-<model-port>.dstack-prod4.phala.network"
             spawntee_port: Port where the spawntee API listens (default 9010)
             timeout: HTTP request timeout in seconds
+            api_token: Bearer token for spawntee API authentication.
+                       When set, sent as Authorization header on every request.
         """
         self._cluster_url_template = cluster_url_template
         self._spawntee_port = spawntee_port
         self._timeout = timeout
         self._base_url = self._build_url(spawntee_port)
         self._session = requests.Session()
+        if api_token:
+            self._session.headers["Authorization"] = f"Bearer {api_token}"
 
     def _build_url(self, port: int) -> str:
         """Build a full URL by substituting the port into the template."""
