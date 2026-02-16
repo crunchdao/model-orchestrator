@@ -15,7 +15,8 @@ infrastructure:
     type: phala
     cluster-name: "bird-tracker"
     phala-api-url: "https://cloud-api.phala.network"
-    runner-compose-path: "/Users/boris/projects/crunch/cruncher_phala/spawntee/docker-compose.phala.runner.yml"
+    registry-compose-path: "model_orchestrator/data/docker-compose.phala.registry.yml"
+    runner-compose-path: "model_orchestrator/data/docker-compose.phala.runner.yml"
     cluster-urls:  # Fallback for local dev (used when cluster-name is empty or Phala API unavailable)
       - "https://8b85319c46f7b82bbd7af014e64d162ad75c74f0-<model-port>.dstack-pha-prod10.phala.network"
     spawntee-port: 9010

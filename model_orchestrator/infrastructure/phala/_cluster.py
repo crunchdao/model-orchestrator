@@ -93,6 +93,7 @@ class PhalaCluster:
         spawntee_port: int = 9010,
         request_timeout: int = 30,
         phala_api_url: str = "",
+        registry_compose_path: str = "",
         runner_compose_path: str = "",
         fallback_urls: list[str] | None = None,
         instance_type: str = "tdx.medium",
@@ -108,7 +109,8 @@ class PhalaCluster:
             spawntee_port: Port where spawntee API listens on each CVM.
             request_timeout: HTTP timeout for spawntee API calls.
             phala_api_url: Phala Cloud API base URL.
-            runner_compose_path: Path to docker-compose.phala.runner.yml for provisioning.
+            registry_compose_path: Path to docker-compose.phala.registry.yml for deploying/upgrading registry.
+            runner_compose_path: Path to docker-compose.phala.runner.yml for provisioning runners.
             fallback_urls: Optional URL templates for local dev (used when cluster_name
                           is empty or Phala API is unavailable).
             instance_type: Phala CVM instance type for new runners (e.g. "tdx.medium").
@@ -122,6 +124,7 @@ class PhalaCluster:
         self.request_timeout = request_timeout
         self.phala_api_url = phala_api_url or DEFAULT_PHALA_API_URL
         self.phala_api_key = os.environ.get("PHALA_API_KEY", "")
+        self.registry_compose_path = registry_compose_path
         self.runner_compose_path = runner_compose_path
         self._fallback_urls = fallback_urls or []
 
