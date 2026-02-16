@@ -17,6 +17,7 @@ __pycache__/
 .devdbrc
 
 .env
+.env.setup
 
 /models.dev.yml
 /orchestrator.dev.db

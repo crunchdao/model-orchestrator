@@ -112,51 +112,83 @@ echo "We need a few values to set up the cluster."
 echo "Press Enter to accept defaults shown in [brackets]."
 echo ""
 
-# AWS credentials (for registry CVM S3 access)
-AWS_ACCESS_KEY_ID=$(ask "AWS_ACCESS_KEY_ID: ")
-if [[ -z "$AWS_ACCESS_KEY_ID" ]]; then
-    err "AWS_ACCESS_KEY_ID is required (registry CVM needs S3 access)"
-    exit 1
+# Load .env.setup if it exists (allows re-runs without re-entering values)
+SETUP_ENV="$ORCH_ROOT/.env.setup"
+if [[ -f "$SETUP_ENV" ]]; then
+    info "Loading saved configuration from $SETUP_ENV"
+    source "$SETUP_ENV"
+    echo ""
 fi
 
-AWS_SECRET_ACCESS_KEY=$(ask "AWS_SECRET_ACCESS_KEY: ")
-if [[ -z "$AWS_SECRET_ACCESS_KEY" ]]; then
-    err "AWS_SECRET_ACCESS_KEY is required"
-    exit 1
+# AWS credentials (for registry CVM S3 access)
+if [[ -z "${AWS_ACCESS_KEY_ID:-}" ]]; then
+    AWS_ACCESS_KEY_ID=$(ask "AWS_ACCESS_KEY_ID: ")
+    if [[ -z "$AWS_ACCESS_KEY_ID" ]]; then
+        err "AWS_ACCESS_KEY_ID is required (registry CVM needs S3 access)"
+        exit 1
+    fi
+else
+    info "AWS_ACCESS_KEY_ID is set (from env)"
+fi
+
+if [[ -z "${AWS_SECRET_ACCESS_KEY:-}" ]]; then
+    AWS_SECRET_ACCESS_KEY=$(ask "AWS_SECRET_ACCESS_KEY: ")
+    if [[ -z "$AWS_SECRET_ACCESS_KEY" ]]; then
+        err "AWS_SECRET_ACCESS_KEY is required"
+        exit 1
+    fi
+else
+    info "AWS_SECRET_ACCESS_KEY is set (from env)"
 fi
 
 default_region="eu-west-1"
-AWS_REGION=$(ask "AWS_REGION [$default_region]: ")
-AWS_REGION="${AWS_REGION:-$default_region}"
+if [[ -z "${AWS_REGION:-}" ]]; then
+    AWS_REGION=$(ask "AWS_REGION [$default_region]: ")
+    AWS_REGION="${AWS_REGION:-$default_region}"
+else
+    info "AWS_REGION is set: $AWS_REGION"
+fi
 
 echo ""
 
 # Phala API key
-PHALA_API_KEY="${PHALA_API_KEY:-}"
-if [[ -z "$PHALA_API_KEY" ]]; then
+if [[ -z "${PHALA_API_KEY:-}" ]]; then
     PHALA_API_KEY=$(ask "PHALA_API_KEY (from https://cloud.phala.network): ")
     if [[ -z "$PHALA_API_KEY" ]]; then
         err "PHALA_API_KEY is required. Run 'phala login' or get it from the dashboard."
         exit 1
     fi
+else
+    info "PHALA_API_KEY is set (from env)"
 fi
-info "PHALA_API_KEY is set"
 
 echo ""
 
 default_cluster="crunch-tee"
-CLUSTER_NAME=$(ask "Cluster name prefix [$default_cluster]: ")
-CLUSTER_NAME="${CLUSTER_NAME:-$default_cluster}"
+if [[ -z "${CLUSTER_NAME:-}" ]]; then
+    CLUSTER_NAME=$(ask "Cluster name prefix [$default_cluster]: ")
+    CLUSTER_NAME="${CLUSTER_NAME:-$default_cluster}"
+else
+    info "CLUSTER_NAME is set: $CLUSTER_NAME"
+fi
 
 default_instance="tdx.medium"
-INSTANCE_TYPE=$(ask "Instance type [$default_instance]: ")
-INSTANCE_TYPE="${INSTANCE_TYPE:-$default_instance}"
+if [[ -z "${INSTANCE_TYPE:-}" ]]; then
+    INSTANCE_TYPE=$(ask "Instance type [$default_instance]: ")
+    INSTANCE_TYPE="${INSTANCE_TYPE:-$default_instance}"
+else
+    info "INSTANCE_TYPE is set: $INSTANCE_TYPE"
+fi
 
 echo ""
 
-# Generate API token
-SPAWNTEE_API_TOKEN=$(openssl rand -hex 32)
-info "Generated SPAWNTEE_API_TOKEN: ${SPAWNTEE_API_TOKEN:0:8}...${SPAWNTEE_API_TOKEN:56}"
+# Generate API token (reuse if already set)
+if [[ -z "${SPAWNTEE_API_TOKEN:-}" ]]; then
+    SPAWNTEE_API_TOKEN=$(openssl rand -hex 32)
+    info "Generated SPAWNTEE_API_TOKEN: ${SPAWNTEE_API_TOKEN:0:8}...${SPAWNTEE_API_TOKEN:56}"
+else
+    info "SPAWNTEE_API_TOKEN is set (from env): ${SPAWNTEE_API_TOKEN:0:8}..."
+fi
 
 echo ""
 echo -e "${BOLD}Configuration summary:${NC}"
@@ -170,6 +202,19 @@ if ! confirm "Proceed with this configuration?"; then
     echo "Aborted."
     exit 0
 fi
+
+# Save configuration for re-runs
+cat > "$SETUP_ENV" <<EOF
+AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
+AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
+AWS_REGION=$AWS_REGION
+PHALA_API_KEY=$PHALA_API_KEY
+CLUSTER_NAME=$CLUSTER_NAME
+INSTANCE_TYPE=$INSTANCE_TYPE
+SPAWNTEE_API_TOKEN=$SPAWNTEE_API_TOKEN
+EOF
+chmod 600 "$SETUP_ENV"
+info "Configuration saved to $SETUP_ENV (for re-runs)"
 
 # ── Phase 3: Write env files ─────────────────────────────────
 
