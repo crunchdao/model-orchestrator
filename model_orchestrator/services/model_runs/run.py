@@ -130,11 +130,11 @@ class _RunService:
                     # case replacement of the model
                     if updated_status == ModelRun.RunnerStatus.RUNNING:
                         get_logger().info(f'Model {model.model_id} is RUNNING on {model.ip}:{model.port}')
-                        replacing_model = self.cluster.get_models_by_model_id_and_desired_status(model.model_id, [ModelRun.DesiredStatus.REPLACING])
-                        if len(replacing_model) > 0:
-                            get_logger().info(f'Runner Model {model.model_id} is replacing model {replacing_model[0].model_id} and is now running, we can stop replaced model')
+                        replacing_models = self.cluster.get_models_by_model_id_and_desired_status(model.model_id, [ModelRun.DesiredStatus.REPLACING])
+                        for replacing_model in replacing_models:
+                            get_logger().info(f'Model {model.model_id} is now running, stopping replaced model {replacing_model.id}')
                             try:
-                                self.stop_model(replacing_model[0])
+                                self.stop_model(replacing_model)
                             except OrchestratorError as e:
                                 errors.append(e)
 
