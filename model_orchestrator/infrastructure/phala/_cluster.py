@@ -93,7 +93,6 @@ class PhalaCluster:
         spawntee_port: int = 9010,
         request_timeout: int = 30,
         phala_api_url: str = "",
-        registry_compose_path: str = "",
         runner_compose_path: str = "",
         instance_type: str = "tdx.medium",
         memory_per_model_mb: int = 1024,
@@ -108,7 +107,6 @@ class PhalaCluster:
             spawntee_port: Port where spawntee API listens on each CVM.
             request_timeout: HTTP timeout for spawntee API calls.
             phala_api_url: Phala Cloud API base URL.
-            registry_compose_path: Path to docker-compose.phala.registry.yml for deploying/upgrading registry.
             runner_compose_path: Path to docker-compose.phala.runner.yml for provisioning runners.
             instance_type: Phala CVM instance type for new runners (e.g. "tdx.medium").
             memory_per_model_mb: Estimated memory per model container in MB.
@@ -122,7 +120,6 @@ class PhalaCluster:
         self.phala_api_url = phala_api_url or DEFAULT_PHALA_API_URL
         self.phala_api_key = os.environ.get("PHALA_API_KEY", "")
         self.spawntee_api_token = os.environ.get("SPAWNTEE_API_TOKEN", "")
-        self.registry_compose_path = registry_compose_path
         self.runner_compose_path = runner_compose_path
         # Capacity planning
         self.instance_type = instance_type

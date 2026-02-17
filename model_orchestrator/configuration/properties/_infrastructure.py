@@ -56,7 +56,6 @@ class PhalaRunnerInfrastructureConfig(_BaseConfig):
     request_timeout: int = Field(30, description="HTTP request timeout in seconds for spawntee API calls")
     cluster_name: str = Field("", description="Name prefix for CVM discovery via Phala Cloud API (e.g. 'bird-tracker')")
     phala_api_url: str = Field("https://cloud-api.phala.network", description="Phala Cloud API base URL")
-    registry_compose_path: str = Field("", description="Path to docker-compose.phala.registry.yml for deploying/upgrading registry CVMs")
     runner_compose_path: str = Field("", description="Path to docker-compose.phala.runner.yml for auto-provisioning new runner CVMs")
     instance_type: str = Field("tdx.medium", description="Phala CVM instance type for auto-provisioned runners (e.g. tdx.small, tdx.medium, tdx.large)")
     memory_per_model_mb: int = Field(1024, description="Estimated memory per model container in MB. Used to calculate max models per CVM.")

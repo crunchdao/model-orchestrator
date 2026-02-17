@@ -17,8 +17,6 @@ infrastructure:
     phala-api-url: "https://cloud-api.phala.network"
     registry-compose-path: "model_orchestrator/data/docker-compose.phala.registry.yml"
     runner-compose-path: "model_orchestrator/data/docker-compose.phala.runner.yml"
-    cluster-urls:  # Fallback for local dev (used when cluster-name is empty or Phala API unavailable)
-      - "https://8b85319c46f7b82bbd7af014e64d162ad75c74f0-<model-port>.dstack-pha-prod10.phala.network"
     spawntee-port: 9010
     request-timeout: 60
     instance-type: "tdx.medium"      # 2 vCPU, 4 GB RAM — for auto-provisioned runners

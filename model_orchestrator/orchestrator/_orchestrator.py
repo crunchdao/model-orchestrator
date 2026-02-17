@@ -95,7 +95,6 @@ class Orchestrator:
                     spawntee_port=runner_config.spawntee_port,
                     request_timeout=runner_config.request_timeout,
                     phala_api_url=runner_config.phala_api_url,
-                    registry_compose_path=runner_config.registry_compose_path,
                     runner_compose_path=runner_config.runner_compose_path,
                     instance_type=runner_config.instance_type,
                     memory_per_model_mb=runner_config.memory_per_model_mb,
