@@ -98,6 +98,8 @@ class Crunch:
     onchain_address: str | None = None
     coordinator_info: CoordinatorInfo | None = None
 
+    is_active: bool = True
+
     def can_model_run_now(self) -> bool:
         if self.run_schedule:
             return self.run_schedule.is_allowed_now()

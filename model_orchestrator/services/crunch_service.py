@@ -33,7 +33,7 @@ class CrunchService:
         self.model_builder = model_builder
         self.config = config
 
-        self.create_crunches()
+        self.deactivated_crunch_ids = self.create_crunches()
 
         self.crunches = {
             crunch.id: crunch
@@ -112,12 +112,28 @@ class CrunchService:
 
             config_crunches.append(crunch)
 
+        # Get all existing crunches from database (including inactive)
+        existing_crunches = {crunch.id: crunch for crunch in self.crunch_repository.load_all()}
+        config_crunch_ids = {crunch.id for crunch in config_crunches}
+
         for crunch in config_crunches:
             get_logger().debug(f'creation/update of crunch:{crunch}')
             crunch.runner_config = self.model_runner.create(crunch)
             crunch.builder_config = self.model_builder.create(crunch)
+            crunch.is_active = True
 
             self.crunch_repository.save(crunch)
+
+        # Mark crunches not in config as inactive
+        deactivated_crunch_ids = []
+        for crunch_id, crunch in existing_crunches.items():
+            if crunch_id not in config_crunch_ids and crunch.is_active:
+                logger.info(f'Deactivating crunch no longer in config: {crunch_id}')
+                crunch.is_active = False
+                self.crunch_repository.save(crunch)
+                deactivated_crunch_ids.append(crunch_id)
+
+        return deactivated_crunch_ids
 
     def update_onchain_infos(self, crunch, config: ModelStateConfigOnChain):
         updated = False

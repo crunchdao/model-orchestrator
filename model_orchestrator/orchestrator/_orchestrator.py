@@ -140,6 +140,9 @@ class Orchestrator:
             app_config=configuration
         )
 
+        # Stop all models on crunches that were deactivated (no longer in config)
+        self._stop_models_on_deactivated_crunches()
+
         self.model_state_mediator = ModelsStateMediator(self.models_run_service)
 
         if runner_config.type == "local":
@@ -348,6 +351,19 @@ class Orchestrator:
 
         self.stop_event.set()
         self.threads_stop_event.set()
+
+    def _stop_models_on_deactivated_crunches(self):
+        """Stop all models on crunches that were deactivated (no longer in config)."""
+        deactivated_crunch_ids = self.crunch_service.deactivated_crunch_ids
+        if not deactivated_crunch_ids:
+            return
+
+        logger.info(f"Stopping models on deactivated crunches: {deactivated_crunch_ids}")
+        for crunch_id in deactivated_crunch_ids:
+            models = self.models_run_service.get_models_by_crunch_id(crunch_id)
+            for model in models:
+                logger.info(f"Stopping model {model.model_id} on deactivated crunch {crunch_id}")
+                self.models_run_service.stop_model(model.model_id)
 
     async def stop_all_models(self):
         logger.info("Stopping all running models...")

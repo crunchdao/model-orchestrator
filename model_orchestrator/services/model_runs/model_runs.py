@@ -229,6 +229,10 @@ class ModelRunsService:
         with self.lock:
             return self.cluster.get_running_models_by_crunch_id(crunch_id).copy()
 
+    def get_models_by_crunch_id(self, crunch_id: str):
+        with self.lock:
+            return self.cluster.get_models_by_crunch_id(crunch_id).copy()
+
     def is_model_in_crunch(self, model_id: str, crunch_id: str) -> bool:
         with self.lock:
             return self.cluster.is_model_in_crunch(model_id, crunch_id)

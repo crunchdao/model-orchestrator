@@ -58,6 +58,7 @@ class SQLiteCrunchRepository(SQLiteRepository, CrunchRepository):
             self._add_column_if_not_exists(db, 'crunches', 'coordinator_wallet_pubkey', str)
             self._add_column_if_not_exists(db, 'crunches', 'coordinator_cert_hash', str)
             self._add_column_if_not_exists(db, 'crunches', 'coordinator_cert_hash_secondary', str)
+            self._add_column_if_not_exists(db, 'crunches', 'is_active', bool, not_null_default=True)
 
     def save(self, crunch: Crunch):
         with self._open() as db:
@@ -87,6 +88,7 @@ class SQLiteCrunchRepository(SQLiteRepository, CrunchRepository):
                     "coordinator_wallet_pubkey": crunch.coordinator_info.wallet_pubkey if crunch.coordinator_info else None,
                     "coordinator_cert_hash": crunch.coordinator_info.cert_hash if crunch.coordinator_info else None,
                     "coordinator_cert_hash_secondary": crunch.coordinator_info.cert_hash_secondary if crunch.coordinator_info else None,
+                    "is_active": crunch.is_active,
                 },
                 pk="id"
             )
@@ -116,7 +118,22 @@ class SQLiteCrunchRepository(SQLiteRepository, CrunchRepository):
         """
         Fetches all active Crunch records from the database.
         Returns:
-            A dictionary where keys are Crunch IDs and values are Crunch objects.
+            A list of active Crunch objects.
+        """
+
+        with self._open() as db:
+            rows = db["crunches"].rows_where("is_active = ?", [True])
+
+            return [
+                self._from_values(row)
+                for row in rows
+            ]
+
+    def load_all(self):
+        """
+        Fetches all Crunch records from the database (including inactive).
+        Returns:
+            A list of all Crunch objects.
         """
 
         with self._open() as db:
@@ -163,7 +180,8 @@ class SQLiteCrunchRepository(SQLiteRepository, CrunchRepository):
                 ZoneInfo(values["run_schedule_tz"]) if values["run_schedule_tz"] else None
             ),
             onchain_address=values["onchain_address"],
-            coordinator_info=None if values["coordinator_wallet_pubkey"] is None else CoordinatorInfo(wallet_pubkey=values["coordinator_wallet_pubkey"], cert_hash=values["coordinator_cert_hash"], cert_hash_secondary=values["coordinator_cert_hash_secondary"])
+            coordinator_info=None if values["coordinator_wallet_pubkey"] is None else CoordinatorInfo(wallet_pubkey=values["coordinator_wallet_pubkey"], cert_hash=values["coordinator_cert_hash"], cert_hash_secondary=values["coordinator_cert_hash_secondary"]),
+            is_active=values.get("is_active", True)
         )
 
 
