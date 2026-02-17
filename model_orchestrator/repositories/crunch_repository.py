@@ -10,6 +10,12 @@ class CrunchRepository(abc.ABC):
 
     @abc.abstractmethod
     def load_active(self) -> list[Crunch]:
+        """Fetch all active crunches."""
+        pass
+
+    @abc.abstractmethod
+    def load_all(self) -> list[Crunch]:
+        """Fetch all crunches including inactive ones."""
         pass
 
     @abc.abstractmethod
