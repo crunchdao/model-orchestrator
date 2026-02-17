@@ -9,6 +9,12 @@ class ModelsStateMediator:
     def get_running_models(self) -> list[ModelRun]:
         return self.models_run_service.get_running_models()
 
+    def get_running_models_by_crunch_id(self, crunch_id: str) -> list[ModelRun]:
+        return self.models_run_service.get_running_models_by_crunch_id(crunch_id)
+
+    def is_model_in_crunch(self, model_id: str, crunch_id: str) -> bool:
+        return self.models_run_service.is_model_in_crunch(model_id, crunch_id)
+
     def get_all_models(self) -> list[ModelRun]:
         return self.models_run_service.get_all_models()
 

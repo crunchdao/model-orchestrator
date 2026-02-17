@@ -70,6 +70,16 @@ class Infrastructure:
     CpuConfig = CpuConfig
     GpuConfig = GpuConfig
 
+    is_secure: bool = False
+    debug_grpc: bool = False
+
+
+@dataclass
+class CoordinatorInfo:
+    wallet_pubkey: str
+    cert_hash: str
+    cert_hash_secondary: str
+
 
 @dataclass
 class Crunch:
@@ -84,6 +94,9 @@ class Crunch:
     network_config: dict | None = None
 
     run_schedule: RunSchedule | None = None
+
+    onchain_address: str | None = None
+    coordinator_info: CoordinatorInfo | None = None
 
     def can_model_run_now(self) -> bool:
         if self.run_schedule:

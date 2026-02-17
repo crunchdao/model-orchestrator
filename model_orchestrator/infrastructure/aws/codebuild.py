@@ -57,7 +57,13 @@ class AwsCodeBuildModelBuilder(Builder):
 
     def build(self, model: ModelRun, crunch: Crunch) -> tuple[str, str, str]:
         builder = self._new_builder(crunch)
-        build_id = builder.start_build(model.code_submission_id, model.resource_id, model.hardware_type, model.docker_tag())
+        build_id = builder.start_build(
+            submission_id=model.code_submission_id,
+            resources_id=model.resource_id,
+            model_id=model.model_id,
+            hardware_type=model.hardware_type,
+            docker_tag=model.docker_tag()
+        )
 
         logs_arn = crunch.builder_config['logs_prefix_arn'] + f'/{build_id.split(":")[-1]}'
         return build_id, f'{builder.ecr_repository_name}:{model.docker_tag()}', logs_arn
@@ -191,7 +197,7 @@ class AwsCodeBuild:
         get_logger().debug(f"Project created: {response['project']['name']}, logs ARN prefix: {logs_arn_prefix}")
         return response['project'], logs_arn_prefix
 
-    def start_build(self, submission_id, resources_id, hardware_type, docker_tag):
+    def start_build(self, submission_id, resources_id, model_id, hardware_type, docker_tag):
         if not bool(submission_id) or submission_id.strip() == "":
             raise ValueError(f"Invalid submission_id: '{submission_id}'.")
 
@@ -203,6 +209,7 @@ class AwsCodeBuild:
             projectName=self.project_name,
             sourceVersion="",
             environmentVariablesOverride=[
+                {"name": "MODEL_ID", "value": str(model_id), "type": "PLAINTEXT"},
                 {"name": "SUBMISSION_ID", "value": str(submission_id), "type": "PLAINTEXT"},  # can't be empty, risk of downloading all codes
                 {"name": "RESOURCES_ID", "value": str(resources_id).strip(), "type": "PLAINTEXT"},  # can't be empty, risk of downloading all models, test is in the buildspec.yml
                 {"name": "HARDWARE_TYPE", "value": hardware_type.value, "type": "PLAINTEXT"},
