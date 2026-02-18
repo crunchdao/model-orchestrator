@@ -113,15 +113,13 @@ class AwsEcsModelRunner(Runner):
             }
         )
 
-        logs_arn = f'{logs_prefix_arn}/{model.docker_image}'
-
         infos = {
             'cluster_name': cluster_name,
             'assign_public_ip': assign_public_ip,
             'service_name': service_name,
         }
 
-        return service_name, logs_arn, infos
+        return service_name, logs_prefix_arn, infos
 
     def create(self, crunch: Crunch) -> dict:
         aws_ecs = AwsEcsRunner(crunch.infrastructure.zone)
