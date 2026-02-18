@@ -204,6 +204,16 @@ class AwsEcsModelRunner(Runner):
                 'created_at': task_created_at.isoformat() if task_created_at else None
             })
 
+            # Update runner_logs_arn with the new task ID
+            # Task ARN format: arn:aws:ecs:{region}:{account}:task/{cluster}/{task_id}
+            task_id = current_task_arn.split('/')[-1]
+            if model.runner_logs_arn:
+                # Store the base logs ARN (without task_id) on first task detection
+                if 'base_logs_arn' not in model.runner_info:
+                    model.runner_info['base_logs_arn'] = model.runner_logs_arn
+                base_logs_arn = model.runner_info['base_logs_arn']
+                model.set_runner_logs_arn(f"{base_logs_arn}/{task_id}")
+
         model.runner_info['task_history'] = task_history
 
         # Filter to tasks within the time window
