@@ -2,7 +2,6 @@ import traceback
 from typing import Callable
 
 from model_orchestrator.entities import ModelRunsCluster, ModelRun, Crunch, OrchestratorError
-from model_orchestrator.entities.errors import NEW_RELIC_ALERT_FLAG
 from model_orchestrator.entities.exceptions import OrchestratorErrors
 from model_orchestrator.repositories import ModelRunRepository, CrunchRepository
 from model_orchestrator.services import Builder
@@ -63,7 +62,7 @@ class _BuildService:
         try:
             models_states = self.builder.load_statuses(models)
         except Exception as e:
-            get_logger().error(f"{NEW_RELIC_ALERT_FLAG} Something going wrong with cloud provider. Impossible to load models build status", exc_info=e)
+            get_logger().error("Cloud provider error: failed to load models build status", exc_info=e)
             return
 
         get_logger().trace(f'_update_builder_states expected: {len(models)} vs actual: {len(models_states)}')

@@ -15,7 +15,9 @@ FROM $BASE_PYTHON_IMAGE AS runtime
 WORKDIR /app
 
 COPY --from=build /app/dist/*.tar.gz /app/dist/*.whl /app/
+COPY entrypoint.sh /app/
 
 RUN pip install --no-cache-dir *.whl
+RUN chmod +x /app/entrypoint.sh
 
-ENTRYPOINT ["model-orchestrator", "start"]
+ENTRYPOINT ["./entrypoint.sh", "model-orchestrator", "start"]
