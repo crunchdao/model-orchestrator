@@ -133,7 +133,7 @@ class RabbitMQPublisher(ModelsStateObserver):
             "submissionId": model_run.code_submission_id,
             "hardwareType": model_run.hardware_type.value,
             "builderLogUri": model_run.builder_logs_arn,
-            "runnerLogUriPrefix": model_run.runner_logs_arn,
+            "runnerLogUri": model_run.runner_logs_arn,
         }
 
     def on_runner_state_changed(self, model_run: ModelRun, previous_state: ModelRun.RunnerStatus, new_state: ModelRun.RunnerStatus):
