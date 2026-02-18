@@ -23,6 +23,16 @@ class SpawnteeClientError(Exception):
         self.response_body = response_body
 
 
+class SpawnteeAuthenticationError(SpawnteeClientError):
+    """Raised on 401/403 from spawntee — indicates a critical config error.
+
+    This must NOT be caught and silently ignored. An authentication failure
+    means the SPAWNTEE_API_TOKEN is wrong or missing, and the orchestrator
+    cannot safely make any decisions (capacity, routing, provisioning).
+    """
+    pass
+
+
 class SpawnteeClient:
     """
     HTTP client for communicating with the Phala spawntee TEE service.
@@ -87,6 +97,14 @@ class SpawnteeClient:
             raise SpawnteeClientError(f"Spawntee request timed out: {e}") from e
         except requests.RequestException as e:
             raise SpawnteeClientError(f"Spawntee request failed: {e}") from e
+
+        if response.status_code in (401, 403):
+            raise SpawnteeAuthenticationError(
+                f"Spawntee authentication failed ({response.status_code}): {response.text}. "
+                f"Check SPAWNTEE_API_TOKEN configuration.",
+                status_code=response.status_code,
+                response_body=response.text,
+            )
 
         if response.status_code >= 400:
             raise SpawnteeClientError(
@@ -185,10 +203,15 @@ class SpawnteeClient:
         """
         Check if this CVM is accepting new models.
 
-        Returns False on any error (network, timeout, etc.) — fail-closed
+        Returns False on transient errors (network, timeout) — fail-closed
         means we won't send models to an unreachable CVM.
+
+        Raises SpawnteeAuthenticationError on 401/403 — this is a critical
+        config error that must not be silently ignored.
         """
         try:
             return self.capacity().get("accepting_new_models", False)
+        except SpawnteeAuthenticationError:
+            raise  # critical — do not swallow
         except SpawnteeClientError:
             return False

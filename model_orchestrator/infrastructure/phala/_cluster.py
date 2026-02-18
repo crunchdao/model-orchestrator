@@ -30,7 +30,7 @@ import uuid
 
 import requests
 
-from ._client import SpawnteeClient, SpawnteeClientError
+from ._client import SpawnteeClient, SpawnteeAuthenticationError, SpawnteeClientError
 
 logger = logging.getLogger(__name__)
 
@@ -182,6 +182,8 @@ class PhalaCluster:
                     self.head_id = cvm.app_id
                     logger.info("📍 Head CVM: %s (%s)", cvm.name, cvm.app_id)
                     break
+            except SpawnteeAuthenticationError:
+                raise  # critical — do not swallow
             except Exception:
                 continue
 
@@ -272,13 +274,19 @@ class PhalaCluster:
         return ""
 
     def _probe_mode(self, client: SpawnteeClient, label: str) -> str | None:
-        """Probe a CVM's /health endpoint to determine its mode."""
+        """Probe a CVM's /health endpoint to determine its mode.
+
+        Raises SpawnteeAuthenticationError on 401/403 — this is a critical
+        config error that should crash the orchestrator.
+        """
         try:
             health = client.health()
             if health.get("service") != "secure-spawn":
                 logger.warning("  ⚠️ %s is not a spawntee service, skipping", label)
                 return None
             return health.get("mode", "unknown")
+        except SpawnteeAuthenticationError:
+            raise  # critical — do not swallow
         except SpawnteeClientError as e:
             logger.warning("  ⚠️ %s unreachable: %s", label, e)
             return None
@@ -304,6 +312,8 @@ class PhalaCluster:
                     if task_id:
                         self.task_client_map[task_id] = app_id
                 logger.info("  📋 %s: %d running model(s)", cvm.name, len(running))
+            except SpawnteeAuthenticationError:
+                raise  # critical — do not swallow
             except SpawnteeClientError as e:
                 logger.warning("  ⚠️ Could not scan %s: %s", cvm.name, e)
 

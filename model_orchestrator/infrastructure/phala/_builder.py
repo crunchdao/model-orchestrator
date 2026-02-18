@@ -19,7 +19,7 @@ from ...entities import ModelRun
 from ...entities.crunch import Crunch
 from ...services import Builder
 from ...utils.logging_utils import get_logger
-from ._client import SpawnteeClientError
+from ._client import SpawnteeAuthenticationError, SpawnteeClientError
 from ._metrics import PhalaMetrics
 
 if TYPE_CHECKING:
@@ -124,6 +124,8 @@ class PhalaModelBuilder(Builder):
                         model.update_builder_status(task_id, ModelRun.BuilderStatus.SUCCESS)
 
                     return True, f"phala-tee://{image_name}" if image_name else ""
+            except SpawnteeAuthenticationError:
+                raise  # critical — do not swallow
             except SpawnteeClientError as e:
                 logger.warning("Could not check image on CVM %s for %s: %s", app_id, submission_id, e)
 
@@ -153,6 +155,8 @@ class PhalaModelBuilder(Builder):
                             rm.get("task_id"), rm.get("external_port"),
                         )
                         return rm
+            except SpawnteeAuthenticationError:
+                raise  # critical — do not swallow
             except SpawnteeClientError as e:
                 logger.warning("Could not query running models on CVM %s: %s", app_id, e)
 
@@ -184,6 +188,8 @@ class PhalaModelBuilder(Builder):
                 # Record metrics for completed/failed operations
                 if self._metrics and spawntee_status in ("completed", "failed"):
                     self._metrics.record_from_task(task)
+            except SpawnteeAuthenticationError:
+                raise  # critical — do not swallow
             except SpawnteeClientError as e:
                 logger.warning("Failed to poll build status for task %s: %s", task_id, e)
                 # Don't mark as FAILED on transient network errors — keep current status

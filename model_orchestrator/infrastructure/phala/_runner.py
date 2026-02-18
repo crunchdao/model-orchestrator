@@ -17,7 +17,7 @@ from ...entities import ModelRun
 from ...entities.crunch import Crunch
 from ...services import Runner
 from ...utils.logging_utils import get_logger
-from ._client import SpawnteeClientError
+from ._client import SpawnteeAuthenticationError, SpawnteeClientError
 from ._metrics import PhalaMetrics
 
 if TYPE_CHECKING:
@@ -139,6 +139,8 @@ class PhalaModelRunner(Runner):
 
                 result[model] = (status, ip, port)
 
+            except SpawnteeAuthenticationError:
+                raise  # critical — do not swallow
             except SpawnteeClientError as e:
                 logger.warning("Failed to poll run status for task %s: %s", task_id, e)
                 # On transient errors, keep current status
