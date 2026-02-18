@@ -197,6 +197,10 @@ class WebSocketServer(ModelsStateObserver):
             get_logger().debug(f"notifying client for model_run: {model_run.model_id} is stopped")
             self.loop.call_soon_threadsafe(self.message_queue.put_nowait, (model_run.crunch_id, [self._create_model_state_message(model_run, ModelRun.RunnerStatus.STOPPED)]))
 
+        elif new_state == ModelRun.RunnerStatus.RECOVERING:
+            get_logger().debug(f"notifying client for model_run: {model_run.model_id} is recovering")
+            self.loop.call_soon_threadsafe(self.message_queue.put_nowait, (model_run.crunch_id, [self._create_model_state_message(model_run, ModelRun.RunnerStatus.RECOVERING)]))
+
     def on_build_state_changed(self, model_run: ModelRun, previous_state: ModelRun.BuilderStatus, new_state: ModelRun.BuilderStatus):
         pass  # no require to notify clients
 

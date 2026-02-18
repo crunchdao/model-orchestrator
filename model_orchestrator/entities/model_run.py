@@ -32,6 +32,7 @@ class ModelRun:
         STOPPING = "STOPPING"
         STOPPED = "STOPPED"
         FAILED = "FAILED"
+        RECOVERING = "RECOVERING"  # Task failed, service is recovering by restarting
 
     class BuilderStatus(Enum):
         BUILDING = "BUILDING"
@@ -195,7 +196,7 @@ class ModelRun:
         return self.runner_status is not None
 
     def is_run_active(self):
-        return self.runner_status in [ModelRun.RunnerStatus.INITIALIZING, ModelRun.RunnerStatus.RUNNING] and self.runner_job_id
+        return self.runner_status in [ModelRun.RunnerStatus.INITIALIZING, ModelRun.RunnerStatus.RECOVERING, ModelRun.RunnerStatus.RUNNING] and self.runner_job_id
 
     def is_running(self):
         return self.runner_status in [ModelRun.RunnerStatus.RUNNING] and self.runner_job_id

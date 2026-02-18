@@ -153,5 +153,11 @@ class _RunService:
                         else:
                             self.cluster.remove(model)
 
+                elif model.runner_status == ModelRun.RunnerStatus.RUNNING and (ip != model.ip or port != model.port):
+                    model.ip = ip
+                    model.port = port
+                    self.model_runs_repository.save_model(model)
+                    self.state_subject.notify_runner_state_changed(model, previous_status, updated_status)
+
         if errors:
             raise OrchestratorErrors(errors)

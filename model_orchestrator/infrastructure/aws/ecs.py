@@ -1,8 +1,11 @@
 from collections import defaultdict
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any, TypedDict
 
 import boto3
+from botocore.config import Config
+from botocore.exceptions import ClientError
 from model_orchestrator.entities import Crunch, Infrastructure, ModelRun
 from model_orchestrator.services import Runner
 from model_orchestrator.utils.compat import batched
@@ -14,6 +17,8 @@ ASSIGN_PUBLIC_IP_DEFAULT = True
 ASSIGN_PUBLIC_IP_KEY = 'assign-public-ip'
 
 _TaskArn = str
+_ServiceArn = str
+_ServiceName = str
 _ENIArn = str
 
 
@@ -21,6 +26,9 @@ class _TaskStatus(TypedDict):
     status: str
     private_ip: str | None
     public_ip: str | None
+    task_arn: str | None
+    task_created_at: datetime | None
+    service_name: str | None
 
 
 class AwsEcsModelRunner(Runner):
@@ -34,7 +42,13 @@ class AwsEcsModelRunner(Runner):
         "DEPROVISIONING": ModelRun.RunnerStatus.STOPPING,
         "STOPPED": ModelRun.RunnerStatus.STOPPED,
         "DELETED": ModelRun.RunnerStatus.STOPPED,
+        "FAILED": ModelRun.RunnerStatus.FAILED,
+        "RECOVERING": ModelRun.RunnerStatus.RECOVERING,
     }
+
+    def __init__(self, config):
+        self.max_task_restarts = config.max_task_restarts
+        self.restart_window_hours = config.restart_window_hours
 
     def run(self, model: ModelRun, crunch: Crunch) -> tuple[str, str, Any]:
         aws_ecs = AwsEcsRunner(crunch.infrastructure.zone)
@@ -64,43 +78,50 @@ class AwsEcsModelRunner(Runner):
             gpu_count=infrastructure_config.gpu_config.gpus if is_gpu else None,
             execution_role_arn=task_execution_role_arn,
             env=[
-                {'name': 'SECURE', 'value': str(crunch.infrastructure.is_secure)},
-                {'name': 'MODEL_ID', 'value': model.model_id},
-                {'name': 'CRUNCH_ONCHAIN_ADDRESS', 'value': crunch.onchain_address or ''},
-                {'name': 'CRUNCHER_WALLET_PUBKEY', 'value': model.cruncher_onchain_info.wallet_pubkey or ''},
-                {'name': 'CRUNCHER_HOTKEY', 'value': model.cruncher_onchain_info.hotkey or ''},
-                {'name': 'COORDINATOR_WALLET_PUBKEY', 'value': (crunch.coordinator_info.wallet_pubkey if crunch.coordinator_info else '') or ''},
-                {'name': 'COORDINATOR_CERT_HASH', 'value': (crunch.coordinator_info.cert_hash if crunch.coordinator_info else '') or ''},
-                {'name': 'COORDINATOR_CERT_HASH_SECONDARY', 'value': (crunch.coordinator_info.cert_hash_secondary if crunch.coordinator_info else '') or ''},
-            ] + ([
-                {'name': 'GRPC_TRACE', 'value': 'handshaker, security, tsi'},
-                {'name': 'GRPC_VERBOSITY', 'value': 'DEBUG'}
-            ] if crunch.infrastructure.debug_grpc else [])
+                    {'name': 'SECURE', 'value': str(crunch.infrastructure.is_secure)},
+                    {'name': 'MODEL_ID', 'value': model.model_id},
+                    {'name': 'CRUNCH_ONCHAIN_ADDRESS', 'value': crunch.onchain_address or ''},
+                    {'name': 'CRUNCHER_WALLET_PUBKEY', 'value': model.cruncher_onchain_info.wallet_pubkey or ''},
+                    {'name': 'CRUNCHER_HOTKEY', 'value': model.cruncher_onchain_info.hotkey or ''},
+                    {'name': 'COORDINATOR_WALLET_PUBKEY', 'value': (crunch.coordinator_info.wallet_pubkey if crunch.coordinator_info else '') or ''},
+                    {'name': 'COORDINATOR_CERT_HASH', 'value': (crunch.coordinator_info.cert_hash if crunch.coordinator_info else '') or ''},
+                    {'name': 'COORDINATOR_CERT_HASH_SECONDARY', 'value': (crunch.coordinator_info.cert_hash_secondary if crunch.coordinator_info else '') or ''},
+                ] + ([
+                         {'name': 'GRPC_TRACE', 'value': 'handshaker, security, tsi'},
+                         {'name': 'GRPC_VERBOSITY', 'value': 'DEBUG'}
+                     ] if crunch.infrastructure.debug_grpc else [])
         )
 
         assign_public_ip = crunch.network_config.get(ASSIGN_PUBLIC_IP_KEY) if crunch.network_config else ASSIGN_PUBLIC_IP_DEFAULT
         if assign_public_ip is None:
             assign_public_ip = True
 
-        task_arn = aws_ecs.run_task(
+        service_name = aws_ecs.create_service(
             cluster_name=cluster_name,
+            service_name=f'{crunch.name}--{model.model_id}--{model.code_submission_id}',
             task_definition=task_definition_arn,
             subnets=subnets,
             security_groups=security_groups,
             job_type=job_type,
             instance_type=(crunch.infrastructure.gpu_config.instances_types[0] if is_gpu else None),  # type: ignore
             assign_public_ip=assign_public_ip,
-            tag_name=crunch.name
+            tags={
+                'com.crunchdao.competition.name': crunch.name,
+                'com.crunchdao.model.name': model.augmented_info.name if model.augmented_info else '',
+                'com.crunchdao.model.id': model.model_id,
+                'com.crunchdao.cruncher.name': model.augmented_info.cruncher_name if model.augmented_info else '',
+            }
         )
 
-        logs_arn = f'{logs_prefix_arn}/{task_arn.split("/")[-1]}'
+        logs_arn = f'{logs_prefix_arn}/{model.docker_image}'
 
         infos = {
             'cluster_name': cluster_name,
             'assign_public_ip': assign_public_ip,
+            'service_name': service_name,
         }
 
-        return task_arn, logs_arn, infos
+        return service_name, logs_arn, infos
 
     def create(self, crunch: Crunch) -> dict:
         aws_ecs = AwsEcsRunner(crunch.infrastructure.zone)
@@ -126,40 +147,94 @@ class AwsEcsModelRunner(Runner):
         grouped_models = defaultdict(list)
         for model in models:
             cluster_name = model.runner_info['cluster_name']
-            grouped_models[cluster_name].append(model.runner_job_id)
+            service_name = model.runner_info.get('service_name', model.runner_job_id)
+            grouped_models[cluster_name].append(service_name)
 
-        tasks_statuses = {}
-        for cluster_name, job_ids in grouped_models.items():
-            cluster_tasks_status = aws_ecs.get_tasks_status(cluster_name, job_ids)
-            tasks_statuses.update(cluster_tasks_status)
+        services_statuses = {}
+        for cluster_name, service_names in grouped_models.items():
+            cluster_services_status = aws_ecs.get_services_status(cluster_name, service_names)
+            services_statuses.update(cluster_services_status)
 
         models_statuses = {}
         for model in models:
-            task_state = tasks_statuses.get(model.runner_job_id, None)
-            if task_state is None:
-                get_logger().warning("AWS ECS: Task not found for model jobid: %s", model.runner_job_id)
+            cluster_name = model.runner_info['cluster_name']
+            service_name = model.runner_info.get('service_name', model.runner_job_id)
+            service_state = services_statuses.get(service_name, None)
+            if service_state is None:
+                get_logger().warning("AWS ECS: Service not found for model: %s", service_name)
                 model_runner_status = None
                 ip = None
             else:
-                model_runner_status = self.ECS_TO_MODEL_RUNNER_STATUS.get(task_state["status"], None)
+                if service_state["status"] == 'PENDING' and model.runner_status in (ModelRun.RunnerStatus.RUNNING, ModelRun.RunnerStatus.RECOVERING):
+                    service_state["status"] = 'RECOVERING'
+
+                model_runner_status = self.ECS_TO_MODEL_RUNNER_STATUS.get(service_state["status"], None)
 
                 if model_runner_status is None:
-                    get_logger().error("AWS ECS: Unknown state for model jobid: %s, state: %s", model.runner_job_id, task_state)
+                    get_logger().error("AWS ECS: Unknown state for model service: %s, state: %s", service_name, service_state)
 
                 use_public_ip = model.runner_info.get('assign_public_ip', ASSIGN_PUBLIC_IP_DEFAULT)
-                ip = task_state["public_ip"] if use_public_ip else task_state["private_ip"]
+                ip = service_state["public_ip"] if use_public_ip else service_state["private_ip"]
+
+                # Track task restarts to detect excessive failures
+                # AWS doesn't provide a solution for managing that. A model can restart infinitely if it succeeds in starting at least once.
+                if self._check_excessive_restarts(model, service_state.get("task_arn"), service_state.get("task_created_at")):
+                    get_logger().debug(f"Model {model.model_id} has excessive restarts ({self.max_task_restarts}+ in {self.restart_window_hours}h), marking as FAILED")
+                    model_runner_status = ModelRun.RunnerStatus.FAILED
+                    self.stop(model)
 
             runner_status = model_runner_status if model_runner_status else ModelRun.RunnerStatus.FAILED
             models_statuses[model] = runner_status, ip, RPC_PORT
 
         return models_statuses
 
+    def _check_excessive_restarts(self, model: ModelRun, current_task_arn: str | None, task_created_at: datetime | None) -> bool:
+        """
+        Track task ARNs in runner_info and check if restarts exceed threshold within time window.
+        Returns True if model should be marked as FAILED due to excessive restarts.
+        """
+        if not current_task_arn or not task_created_at:
+            return False
+
+        task_history = model.runner_info.get('task_history', [])
+
+        # Check if this is a new task
+        last_task_arn = task_history[-1]['task_arn'] if task_history else None
+        if current_task_arn != last_task_arn:
+            task_history.append({
+                'task_arn': current_task_arn,
+                'created_at': task_created_at.isoformat() if task_created_at else None
+            })
+
+        model.runner_info['task_history'] = task_history
+
+        # Filter to tasks within the time window
+        now = datetime.now(timezone.utc)
+        cutoff = now - timedelta(hours=self.restart_window_hours)
+        recent_tasks = []
+        for t in task_history:
+            created_at_str = t['created_at']
+            if not created_at_str:
+                continue
+            # Parse ISO format string back to datetime
+            created_at = datetime.fromisoformat(created_at_str)
+            # Handle naive datetimes (assume UTC)
+            if created_at.tzinfo is None:
+                created_at = created_at.replace(tzinfo=timezone.utc)
+            if created_at > cutoff:
+                recent_tasks.append(t)
+
+        # Check if exceeded threshold (more than MAX means excessive restarts)
+        return len(recent_tasks) > self.max_task_restarts
+
     def load_status(self, model: ModelRun) -> tuple[ModelRun.RunnerStatus, str, int]:
         return self.load_statuses([model])[model]
 
     def stop(self, model: ModelRun) -> str:
         aws_ecs = AwsEcsRunner(None)
-        return aws_ecs.stop_task(model.runner_info['cluster_name'], model.runner_job_id)
+        service_name = model.runner_info.get('service_name', model.runner_job_id)
+        aws_ecs.stop_service(model.runner_info['cluster_name'], service_name)
+        return service_name
 
 
 class AwsEcsRunner:
@@ -169,7 +244,9 @@ class AwsEcsRunner:
 
     def __init__(self, region):
         self.region = region
-        self.ecs_client = boto3.client('ecs', region_name=region)
+        # Adaptive retry mode handles throttling with exponential backoff
+        retry_config = Config(retries={'max_attempts': 10, 'mode': 'adaptive'})
+        self.ecs_client = boto3.client('ecs', region_name=region, config=retry_config)
 
     def cluster_exists(self, cluster_name):
         """Check if an ECS cluster exists."""
@@ -300,55 +377,232 @@ class AwsEcsRunner:
         get_logger().debug(f"Registered new Task Definition: {response['taskDefinition']['taskDefinitionArn']}")
         return response['taskDefinition']['taskDefinitionArn'], logs_prefix_arn
 
-    def run_task(
+    def create_service(
         self,
         *,
         cluster_name: str,
+        service_name: str,
         task_definition: str,
         subnets: list[str],
         security_groups: list[str],
         job_type: JobType,
         instance_type: str | None,
         assign_public_ip: bool,
-        tag_name: str
-    ):
-        """Run a task in ECS."""
+        tags: dict[str, str]
+    ) -> _ServiceName:
+        """Create an ECS service with desired count of 1. Services auto-restart tasks on failures or AWS maintenance."""
 
-        run_task_args = {
-            "cluster": cluster_name,
-            "launchType": 'FARGATE' if job_type == self.JobType.CPU else 'EC2',
-            "networkConfiguration": {
-                'awsvpcConfiguration': {
-                    'subnets': subnets,
-                    'securityGroups': security_groups,
-                    'assignPublicIp': 'ENABLED' if assign_public_ip else 'DISABLED',
-                }
-            },
-            "taskDefinition": task_definition,
-            "overrides": {
-                'containerOverrides': []
-            },
-            "tags": [
-                {"key": "com.crunchdao.competition.name", "value": tag_name}  # Include the competition name
-            ]
-
+        network_configuration = {
+            'awsvpcConfiguration': {
+                'subnets': subnets,
+                'securityGroups': security_groups,
+                'assignPublicIp': 'ENABLED' if assign_public_ip else 'DISABLED',
+            }
         }
 
-        if job_type == self.JobType.GPU:
-            run_task_args["placementConstraints"] = [
-                {
-                    'type': 'memberOf',
-                    "expression": f"attribute:ecs.instance-type == {instance_type}"
-                }
-            ]
+        deployment_configuration = {
+            'maximumPercent': 100,
+            'minimumHealthyPercent': 0,
+            'deploymentCircuitBreaker': {
+                'enable': True,
+                'rollback': False,
+            },
+        }
 
-        response = self.ecs_client.run_task(**run_task_args)
-        task_arn = response['tasks'][0]['taskArn']
-        get_logger().debug(f"Started Task: {task_arn}")
-        return task_arn
+        placement_constraints = [
+            {'type': 'memberOf', 'expression': f"attribute:ecs.instance-type == {instance_type}"}
+        ] if job_type == self.JobType.GPU else []
+
+        common_args = {
+            "cluster": cluster_name,
+            "taskDefinition": task_definition,
+            "desiredCount": 1,
+            "networkConfiguration": network_configuration,
+            "deploymentConfiguration": deployment_configuration,
+        }
+
+        if placement_constraints:
+            common_args["placementConstraints"] = placement_constraints
+
+        existing_service = self._get_service(cluster_name, service_name)
+        service_status = existing_service.get('status') if existing_service else None
+
+        if service_status == 'ACTIVE':
+            self.ecs_client.update_service(service=service_name, **common_args)
+            get_logger().debug(f"Updated Service: {service_name}")
+        else:
+            if service_status:
+                # Service exists but not ACTIVE (DRAINING/INACTIVE) - wait for it
+                get_logger().debug(f"Service '{service_name}' is {service_status}, waiting...")
+                waiter = self.ecs_client.get_waiter('services_inactive')
+                waiter.wait(cluster=cluster_name, services=[service_name])
+
+            aws_tags = [{'key': k, 'value': v} for k, v in tags.items()]
+            self.ecs_client.create_service(
+                serviceName=service_name,
+                launchType='FARGATE' if job_type == self.JobType.CPU else 'EC2',
+                tags=aws_tags,
+                enableECSManagedTags=True,
+                propagateTags="SERVICE",
+                **common_args
+            )
+            get_logger().debug(f"Created Service: {service_name}")
+        return service_name
+
+    def _get_service(self, cluster_name: str, service_name: str) -> dict | None:
+        """Get service details if it exists."""
+        try:
+            response = self.ecs_client.describe_services(
+                cluster=cluster_name,
+                services=[service_name]
+            )
+            services = response.get('services', [])
+            if services:
+                return services[0]
+        except ClientError:
+            pass
+        return None
+
+    def stop_service(self, cluster_name: str, service_name: str):
+        """Stop an ECS service by scaling to 0 tasks."""
+        try:
+            self.ecs_client.update_service(
+                cluster=cluster_name,
+                service=service_name,
+                desiredCount=0
+            )
+            get_logger().debug(f"Stopped service '{service_name}' (scaled to 0 tasks)")
+        except ClientError as e:
+            error_code = e.response['Error']['Code']
+            if error_code == 'ServiceNotFoundException':
+                get_logger().debug(f"Service '{service_name}' not found")
+            elif error_code == 'ServiceNotActiveException':
+                get_logger().debug(f"Service '{service_name}' already not active")
+            else:
+                raise
+
+    def delete_service(self, cluster_name: str, service_name: str):
+        """Delete an ECS service. First scales to 0, then deletes."""
+        try:
+            # First, update desired count to 0 to stop all tasks
+            try:
+                self.ecs_client.update_service(
+                    cluster=cluster_name,
+                    service=service_name,
+                    desiredCount=0
+                )
+                get_logger().debug(f"Scaled service '{service_name}' to 0 tasks")
+            except ClientError as e:
+                error_code = e.response['Error']['Code']
+                if error_code in ('ServiceNotActiveException', 'ServiceNotFoundException'):
+                    get_logger().debug(f"Service '{service_name}' not active/found, skipping scale down")
+                else:
+                    raise
+
+            # Then delete the service
+            response = self.ecs_client.delete_service(
+                cluster=cluster_name,
+                service=service_name,
+                force=True  # Force delete even if there are running tasks
+            )
+            get_logger().debug(f"Deleted Service: {service_name}")
+            return response
+        except ClientError as e:
+            if e.response['Error']['Code'] == 'ServiceNotFoundException':
+                get_logger().warning(f"Service '{service_name}' not found, may already be deleted")
+                return None
+            raise
+
+    def _describe_services_batched(
+        self,
+        cluster_name: str,
+        service_names: list[_ServiceName],
+        chunk_size: int = 10
+    ) -> list[dict]:
+        """
+        Describe services in batches to handle AWS limit of 10 services per call.
+        Returns aggregated list of service descriptions.
+        """
+        all_services = []
+        for chunk in batched(service_names, chunk_size):
+            try:
+                response = self.ecs_client.describe_services(
+                    cluster=cluster_name,
+                    services=list(chunk)
+                )
+                all_services.extend(response.get('services', []))
+            except ClientError as e:
+                get_logger().error(f"Error describing services batch: {e}")
+        return all_services
+
+    def get_services_status(
+        self,
+        cluster_name: str,
+        service_names: list[_ServiceName],
+    ) -> dict[_ServiceName, _TaskStatus]:
+        """
+        Get the status of ECS services by checking their running tasks.
+        Returns the status of the first running task for each service.
+        Only returns entries for services that are actually found.
+        """
+        services_status: dict[_ServiceName, _TaskStatus] = {}
+
+        services = self._describe_services_batched(cluster_name, service_names)
+
+        for service in services:
+            service_name = service['serviceName']
+            running_count = service.get('runningCount', 0)
+            desired_count = service.get('desiredCount', 0)
+            status = service.get('status', 'INACTIVE')
+
+            # Check deployment state for circuit breaker and retries
+            deployments = service.get('deployments', [])
+            primary_deployment = next((d for d in deployments if d.get('status') == 'PRIMARY'), None)
+            rollout_state = primary_deployment.get('rolloutState') if primary_deployment else None
+            failed_tasks = primary_deployment.get('failedTasks', 0) if primary_deployment else 0
+
+            # Determine service-level status (not task-level)
+            if rollout_state == 'FAILED':
+                service_status = "FAILED"
+            elif rollout_state == 'IN_PROGRESS' and failed_tasks > 0:
+                service_status = "RECOVERING"
+            elif status == 'DRAINING':
+                service_status = "STOPPING"
+            elif status == 'INACTIVE':
+                service_status = "STOPPED"
+            elif desired_count == 0 and running_count == 0:
+                service_status = "STOPPED"
+            elif desired_count == 0 and running_count > 0:
+                service_status = "STOPPING"
+            elif running_count == 0 and desired_count > 0:
+                service_status = "PENDING"
+            else:
+                service_status = "RUNNING"
+
+            services_status[service_name] = {"status": service_status, "private_ip": None, "public_ip": None, "task_arn": None, "task_created_at": None, "service_name": service_name}
+
+        # List all tasks in cluster (1 paginated call instead of N calls per service)
+        all_task_arns = self._list_tasks_paginated(cluster_name, desired_status='RUNNING')
+
+        if all_task_arns:
+            # Get task details including service_name from group field
+            tasks_info = self.get_tasks_status(cluster_name, all_task_arns)
+
+            # Update IPs, task ARN and created_at from task info (keep service-level status)
+            for task_arn, task_info in tasks_info.items():
+                service_name = task_info.get("service_name")
+                if service_name and service_name in services_status:
+                    # Only update if we don't have IP info yet (use first task)
+                    if services_status[service_name]["task_arn"] is None:
+                        services_status[service_name]["private_ip"] = task_info["private_ip"]
+                        services_status[service_name]["public_ip"] = task_info["public_ip"]
+                        services_status[service_name]["task_arn"] = task_arn
+                        services_status[service_name]["task_created_at"] = task_info.get("task_created_at")
+
+        return services_status
 
     def stop_task(self, cluster_name, task_arn):
-        """Stop a running task in ECS."""
+        """Stop a running task in ECS. Kept for backwards compatibility."""
         response = self.ecs_client.stop_task(
             cluster=cluster_name,
             task=task_arn,
@@ -356,6 +610,39 @@ class AwsEcsRunner:
         )
         get_logger().debug(f"Stopped Task: {task_arn}")
         return response
+
+    def _list_tasks_paginated(
+        self,
+        cluster_name: str,
+        desired_status: str = 'RUNNING'
+    ) -> list[_TaskArn]:
+        """
+        List all tasks in a cluster with pagination.
+        Returns all task ARNs matching the desired status.
+        """
+        all_task_arns = []
+        next_token = None
+
+        while True:
+            try:
+                kwargs = {
+                    'cluster': cluster_name,
+                    'desiredStatus': desired_status,
+                }
+                if next_token:
+                    kwargs['nextToken'] = next_token
+
+                response = self.ecs_client.list_tasks(**kwargs)
+                all_task_arns.extend(response.get('taskArns', []))
+
+                next_token = response.get('nextToken')
+                if not next_token:
+                    break
+            except ClientError as e:
+                get_logger().error(f"Error listing tasks: {e}")
+                break
+
+        return all_task_arns
 
     def get_tasks_status(
         self,
@@ -400,11 +687,18 @@ class AwsEcsRunner:
         for task in response['tasks']:
             task_status: str = task['lastStatus']
             task_arn: _TaskArn = task['taskArn']
+            task_created_at: datetime | None = task.get('createdAt')
+            # Extract service name from group (format: "service:service-name")
+            group = task.get('group', '')
+            service_name = group.replace('service:', '') if group.startswith('service:') else None
 
             tasks_status_and_ips[task_arn] = {
                 "status": task_status,
                 "private_ip": None,
                 "public_ip": None,
+                "task_arn": task_arn,
+                "task_created_at": task_created_at,
+                "service_name": service_name,
             }
 
             if task_status != "RUNNING":
