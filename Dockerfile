@@ -13,7 +13,10 @@ RUN poetry build
 FROM $BASE_PYTHON_IMAGE AS runtime
 
 # Install Node.js and Phala CLI (needed for TEE CVM provisioning)
-RUN apt-get update && apt-get install -y --no-install-recommends nodejs npm \
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl ca-certificates gnupg \
+    && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
     && npm install -g phala \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
