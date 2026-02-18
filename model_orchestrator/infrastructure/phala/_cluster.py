@@ -30,7 +30,7 @@ import uuid
 
 import requests
 
-from ._client import SpawnteeClient, SpawnteeAuthenticationError, SpawnteeClientError
+from ._client import SpawnteeClient, SpawnteeClientError
 
 logger = logging.getLogger(__name__)
 
@@ -174,28 +174,24 @@ class PhalaCluster:
             logger.warning("⚠️ No CVMs discovered")
             return
 
-        # Determine head: the last CVM that still has capacity
-        # Check in reverse order (newest runners first, then registry)
+        # Determine head: the last CVM that still has capacity.
+        # Check in reverse order (newest runners first, then registry).
+        # has_capacity() retries internally; if it still fails, the error
+        # propagates — we refuse to guess.
         for cvm in reversed(list(self.cvms.values())):
-            try:
-                if cvm.client.has_capacity():
-                    self.head_id = cvm.app_id
-                    logger.info("📍 Head CVM: %s (%s)", cvm.name, cvm.app_id)
-                    break
-            except SpawnteeAuthenticationError:
-                raise  # critical — do not swallow
-            except Exception:
-                continue
+            if cvm.client.has_capacity():
+                self.head_id = cvm.app_id
+                logger.info("📍 Head CVM: %s (%s)", cvm.name, cvm.app_id)
+                break
 
         if not self.head_id:
-            # Fallback: use the registry as head (even if full - provisioning
-            # will handle it when a build is requested)
+            # All CVMs report full (but reachable). Use the registry as head;
+            # ensure_capacity will provision a new runner when a build arrives.
             registry = next((c for c in self.cvms.values() if "registry" in c.mode), None)
             if registry:
                 self.head_id = registry.app_id
                 logger.warning("⚠️ No CVM has capacity, defaulting head to registry: %s", registry.name)
             else:
-                # Last resort: first CVM
                 self.head_id = next(iter(self.cvms))
                 logger.warning("⚠️ No registry found, defaulting head to: %s", self.head_id)
 
@@ -276,20 +272,15 @@ class PhalaCluster:
     def _probe_mode(self, client: SpawnteeClient, label: str) -> str | None:
         """Probe a CVM's /health endpoint to determine its mode.
 
-        Raises SpawnteeAuthenticationError on 401/403 — this is a critical
-        config error that should crash the orchestrator.
+        health() retries internally on transient errors. If it still fails
+        (auth error, retries exhausted), the exception propagates — we
+        refuse to silently skip a CVM we can't reach.
         """
-        try:
-            health = client.health()
-            if health.get("service") != "secure-spawn":
-                logger.warning("  ⚠️ %s is not a spawntee service, skipping", label)
-                return None
-            return health.get("mode", "unknown")
-        except SpawnteeAuthenticationError:
-            raise  # critical — do not swallow
-        except SpawnteeClientError as e:
-            logger.warning("  ⚠️ %s unreachable: %s", label, e)
+        health = client.health()
+        if health.get("service") != "secure-spawn":
+            logger.warning("  ⚠️ %s is not a spawntee service, skipping", label)
             return None
+        return health.get("mode", "unknown")
 
     # ─── Task routing ───
 
@@ -303,19 +294,15 @@ class PhalaCluster:
             self._rebuild_task_map_unlocked()
 
     def _rebuild_task_map_unlocked(self):
+        """Scan all CVMs for running models. Errors propagate after retries."""
         self.task_client_map.clear()
         for app_id, cvm in self.cvms.items():
-            try:
-                running = cvm.client.get_running_models()
-                for model in running:
-                    task_id = model.get("task_id")
-                    if task_id:
-                        self.task_client_map[task_id] = app_id
-                logger.info("  📋 %s: %d running model(s)", cvm.name, len(running))
-            except SpawnteeAuthenticationError:
-                raise  # critical — do not swallow
-            except SpawnteeClientError as e:
-                logger.warning("  ⚠️ Could not scan %s: %s", cvm.name, e)
+            running = cvm.client.get_running_models()
+            for model in running:
+                task_id = model.get("task_id")
+                if task_id:
+                    self.task_client_map[task_id] = app_id
+            logger.info("  📋 %s: %d running model(s)", cvm.name, len(running))
 
         logger.info("✅ Task map rebuilt: %d task(s) across %d CVM(s)",
                      len(self.task_client_map), len(self.cvms))
@@ -410,7 +397,9 @@ class PhalaCluster:
                 self._provision_new_runner()
                 return
 
-            # 3. CVM-side safety net (disk/memory based CAPACITY_THRESHOLD)
+            # 3. CVM-side safety net (disk/memory based CAPACITY_THRESHOLD).
+            # has_capacity() retries internally; if it still fails the error
+            # propagates — we never provision based on a guess.
             if not head.client.has_capacity():
                 logger.info(
                     "📊 Head CVM %s reports no capacity (CAPACITY_THRESHOLD safety net), "

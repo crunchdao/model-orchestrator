@@ -5,6 +5,7 @@ Provides methods to call all spawntee API endpoints:
 build-model, start-model, stop-model, task status, running models, keypair.
 """
 
+import time
 from urllib.parse import urlparse
 
 import requests
@@ -12,6 +13,10 @@ import requests
 from ...utils.logging_utils import get_logger
 
 logger = get_logger()
+
+# Retry defaults for transient network errors
+DEFAULT_MAX_RETRIES = 3
+DEFAULT_RETRY_BACKOFF = 2.0  # seconds, doubled each attempt
 
 
 class SpawnteeClientError(Exception):
@@ -84,42 +89,86 @@ class SpawnteeClient:
         parsed = urlparse(url)
         return parsed.hostname, 443
 
-    def _request(self, method: str, path: str, **kwargs) -> requests.Response:
-        """Make an HTTP request to the spawntee API."""
+    def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        max_retries: int = 0,
+        retry_backoff: float = DEFAULT_RETRY_BACKOFF,
+        **kwargs,
+    ) -> requests.Response:
+        """Make an HTTP request to the spawntee API.
+
+        Args:
+            max_retries: Number of retries on transient (network/timeout) errors.
+                         0 = no retries (default for mutating calls).
+            retry_backoff: Initial backoff in seconds, doubled each attempt.
+
+        Raises:
+            SpawnteeAuthenticationError: On 401/403 (never retried).
+            SpawnteeClientError: On other HTTP errors or after retries exhausted.
+        """
         url = f"{self._base_url}{path}"
         kwargs.setdefault("timeout", self._timeout)
 
-        try:
-            response = self._session.request(method, url, **kwargs)
-        except requests.ConnectionError as e:
-            raise SpawnteeClientError(f"Connection to spawntee failed: {e}") from e
-        except requests.Timeout as e:
-            raise SpawnteeClientError(f"Spawntee request timed out: {e}") from e
-        except requests.RequestException as e:
-            raise SpawnteeClientError(f"Spawntee request failed: {e}") from e
+        last_error: SpawnteeClientError | None = None
 
-        if response.status_code in (401, 403):
-            raise SpawnteeAuthenticationError(
-                f"Spawntee authentication failed ({response.status_code}): {response.text}. "
-                f"Check SPAWNTEE_API_TOKEN configuration.",
-                status_code=response.status_code,
-                response_body=response.text,
-            )
+        for attempt in range(1 + max_retries):
+            try:
+                response = self._session.request(method, url, **kwargs)
+            except requests.ConnectionError as e:
+                last_error = SpawnteeClientError(f"Connection to spawntee failed: {e}")
+                last_error.__cause__ = e
+            except requests.Timeout as e:
+                last_error = SpawnteeClientError(f"Spawntee request timed out: {e}")
+                last_error.__cause__ = e
+            except requests.RequestException as e:
+                last_error = SpawnteeClientError(f"Spawntee request failed: {e}")
+                last_error.__cause__ = e
+            else:
+                # Got an HTTP response — check status
+                if response.status_code in (401, 403):
+                    raise SpawnteeAuthenticationError(
+                        f"Spawntee authentication failed ({response.status_code}): {response.text}. "
+                        f"Check SPAWNTEE_API_TOKEN configuration.",
+                        status_code=response.status_code,
+                        response_body=response.text,
+                    )
 
-        if response.status_code >= 400:
-            raise SpawnteeClientError(
-                f"Spawntee returned {response.status_code}: {response.text}",
-                status_code=response.status_code,
-                response_body=response.text,
-            )
+                if response.status_code >= 500:
+                    # Server error — retryable
+                    last_error = SpawnteeClientError(
+                        f"Spawntee returned {response.status_code}: {response.text}",
+                        status_code=response.status_code,
+                        response_body=response.text,
+                    )
+                elif response.status_code >= 400:
+                    # Client error (4xx except auth) — not retryable
+                    raise SpawnteeClientError(
+                        f"Spawntee returned {response.status_code}: {response.text}",
+                        status_code=response.status_code,
+                        response_body=response.text,
+                    )
+                else:
+                    return response
 
-        return response
+            # Transient error — retry if we have attempts left
+            if attempt < max_retries:
+                delay = retry_backoff * (2 ** attempt)
+                logger.warning(
+                    "⚠️ %s %s failed (attempt %d/%d): %s — retrying in %.1fs",
+                    method, path, attempt + 1, 1 + max_retries, last_error, delay,
+                )
+                time.sleep(delay)
+
+        raise last_error  # type: ignore[misc]
 
     # ── Spawntee API methods ──────────────────────────────────────────
 
     def health(self) -> dict:
-        """GET / — health check."""
-        return self._request("GET", "/").json()
+        """GET / — health check (retries on transient errors)."""
+        return self._request("GET", "/", max_retries=DEFAULT_MAX_RETRIES).json()
 
     def get_keypair(self, submission_id: str) -> dict:
         """GET /keypair/{submission_id} — get public key for encryption."""
@@ -171,7 +220,7 @@ class SpawnteeClient:
 
         Returns full task status including operations history and metadata.
         """
-        return self._request("GET", f"/task/{task_id}").json()
+        return self._request("GET", f"/task/{task_id}", max_retries=DEFAULT_MAX_RETRIES).json()
 
     def get_running_models(self) -> list[dict]:
         """
@@ -179,7 +228,7 @@ class SpawnteeClient:
 
         Returns list of running model dicts with task_id, container_id, status, port.
         """
-        response = self._request("GET", "/running_models").json()
+        response = self._request("GET", "/running_models", max_retries=DEFAULT_MAX_RETRIES).json()
         return response.get("running_models", [])
 
     def check_model_image(self, submission_id: str) -> dict:
@@ -188,7 +237,7 @@ class SpawnteeClient:
 
         Returns dict with submission_id, image_exists, image_name.
         """
-        return self._request("GET", f"/submission-image/{submission_id}").json()
+        return self._request("GET", f"/submission-image/{submission_id}", max_retries=DEFAULT_MAX_RETRIES).json()
 
     def capacity(self) -> dict:
         """
@@ -197,21 +246,14 @@ class SpawnteeClient:
         Returns dict with total_memory_mb, available_memory_mb, running_models,
         accepting_new_models, capacity_threshold, etc.
         """
-        return self._request("GET", "/capacity").json()
+        return self._request("GET", "/capacity", max_retries=DEFAULT_MAX_RETRIES).json()
 
     def has_capacity(self) -> bool:
         """
         Check if this CVM is accepting new models.
 
-        Returns False on transient errors (network, timeout) — fail-closed
-        means we won't send models to an unreachable CVM.
-
-        Raises SpawnteeAuthenticationError on 401/403 — this is a critical
-        config error that must not be silently ignored.
+        Retries on transient errors (network, timeout, 5xx) before giving up.
+        Raises on auth errors (401/403) and after retries are exhausted —
+        the caller must not make capacity decisions without a real answer.
         """
-        try:
-            return self.capacity().get("accepting_new_models", False)
-        except SpawnteeAuthenticationError:
-            raise  # critical — do not swallow
-        except SpawnteeClientError:
-            return False
+        return self.capacity().get("accepting_new_models", False)
