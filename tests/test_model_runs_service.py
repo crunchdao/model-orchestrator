@@ -198,6 +198,7 @@ class TestModelRunsService(unittest.TestCase):
                 runner_status=ModelRun.RunnerStatus.RUNNING,
                 runner_job_id="mock_runner_job_id",
                 ip="127.0.0.1",
+                port=50051,
             )
         )
 
@@ -242,6 +243,7 @@ class TestModelRunsService(unittest.TestCase):
                 runner_status=ModelRun.RunnerStatus.RUNNING,
                 runner_job_id="mock_runner_job_id",
                 ip="127.0.0.1",
+                port=50051,
             )
         )
 
