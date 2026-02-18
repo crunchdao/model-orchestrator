@@ -478,7 +478,7 @@ class PhalaCluster:
                 capture_output=True,
                 text=True,
                 timeout=300,  # 5 minute timeout for deploy + wait
-                env={**os.environ, "PHALA_API_KEY": self.phala_api_key},
+                env={**os.environ, "PHALA_API_KEY": self.phala_api_key, "PHALA_CLOUD_API_KEY": self.phala_api_key},
             )
         except subprocess.TimeoutExpired:
             raise PhalaClusterError(f"phala deploy timed out for {cvm_name}")
