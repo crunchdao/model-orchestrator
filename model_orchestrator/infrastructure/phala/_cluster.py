@@ -621,9 +621,16 @@ class PhalaCluster:
             gateway_credentials=self.gateway_credentials,
         )
 
-        max_wait = 180  # 3 minutes
+        # Wait for the CVM to be fully ready in two stages:
+        #   1. /health → "healthy"  (FastAPI is up)
+        #   2. /capacity → accepting_new_models: true  (Docker, nginx, full stack ready)
+        # Without stage 2, builds routed to the new head can fail because
+        # Docker-in-Docker hasn't finished initializing yet.
+        max_wait = 180  # 3 minutes total for both stages
         elapsed = 0
         interval = 10
+
+        # Stage 1: wait for healthy
         while elapsed < max_wait:
             try:
                 health = new_client.health()
@@ -637,6 +644,25 @@ class PhalaCluster:
         else:
             raise PhalaClusterError(
                 f"CVM {cvm_name} did not become healthy within {max_wait}s"
+            )
+
+        # Stage 2: wait for capacity (full readiness)
+        while elapsed < max_wait:
+            try:
+                cap = new_client.capacity()
+                if cap.get("accepting_new_models"):
+                    logger.info(
+                        "  ✅ CVM %s is ready (accepting models, took %ds total)",
+                        cvm_name, elapsed,
+                    )
+                    break
+            except SpawnteeClientError as e:
+                logger.debug("  ⏳ CVM %s capacity not ready yet: %s", cvm_name, e)
+            time.sleep(interval)
+            elapsed += interval
+        else:
+            raise PhalaClusterError(
+                f"CVM {cvm_name} is healthy but not accepting models within {max_wait}s"
             )
 
         # Add to cluster and make it the new head
