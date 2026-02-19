@@ -10,6 +10,7 @@ from model_orchestrator.infrastructure.phala._cluster import (
     CVMInfo,
     PhalaCluster,
     PhalaClusterError,
+    SYSTEM_OVERHEAD_MB,
 )
 from model_orchestrator.infrastructure.phala._client import SpawnteeClient, SpawnteeClientError  # noqa: F401
 
@@ -18,7 +19,8 @@ from model_orchestrator.infrastructure.phala._client import SpawnteeClient, Spaw
 def mock_client_factory():
     """Factory that creates mock SpawnteeClients with configurable responses."""
 
-    def _make(mode="registry+runner", has_capacity=True, running_models=None):
+    def _make(mode="registry+runner", has_capacity=True, running_models=None,
+              total_memory_mb=4096):
         client = MagicMock(spec=SpawnteeClient)
         client.health.return_value = {
             "status": "healthy",
@@ -27,6 +29,12 @@ def mock_client_factory():
         }
         client.has_capacity.return_value = has_capacity
         client.get_running_models.return_value = running_models or []
+        client.capacity.return_value = {
+            "total_memory_mb": total_memory_mb,
+            "available_memory_mb": total_memory_mb - SYSTEM_OVERHEAD_MB,
+            "accepting_new_models": has_capacity,
+            "running_models": len(running_models or []),
+        }
         return client
 
     return _make
@@ -245,40 +253,8 @@ class TestTaskRouting:
         assert cluster.task_client_map["task-3"] == "cvm2"
 
 
-class TestCapacityPlanning:
-    """Test capacity calculation from instance type and memory settings."""
-
-    def test_default_medium_1gb_models(self):
-        cluster = PhalaCluster(
-            cluster_name="",
-            instance_type="tdx.medium",  # 4096 MB
-            memory_per_model_mb=1024,
-        )
-        # (4096 - 500) / 1024 = 3.51 → 3
-        assert cluster.max_models_per_cvm == 3
-        # 3 * 0.8 = 2.4 → 2
-        assert cluster.provision_threshold == 2
-
-    def test_large_instance_small_models(self):
-        cluster = PhalaCluster(
-            cluster_name="",
-            instance_type="tdx.large",  # 8192 MB
-            memory_per_model_mb=512,
-        )
-        # (8192 - 500) / 512 = 15.02 → 15
-        assert cluster.max_models_per_cvm == 15
-        # 15 * 0.8 = 12
-        assert cluster.provision_threshold == 12
-
-    def test_small_instance_big_model_minimum_one(self):
-        cluster = PhalaCluster(
-            cluster_name="",
-            instance_type="tdx.small",  # 2048 MB
-            memory_per_model_mb=4096,
-        )
-        # (2048 - 500) / 4096 = 0.37 → clamped to 1
-        assert cluster.max_models_per_cvm == 1
-        assert cluster.provision_threshold == 1
+class TestInitValidation:
+    """Test __init__ validation."""
 
     def test_unknown_instance_type_raises(self):
         with pytest.raises(PhalaClusterError, match="Unknown instance type"):
@@ -291,10 +267,88 @@ class TestCapacityPlanning:
             memory_per_model_mb=1024,
             provision_factor=1.5,  # should be clamped to 1.0
         )
+        assert cluster.provision_factor == 1.0
+
+
+class TestComputeCvmLimits:
+    """Test dynamic CVM limit computation from live /capacity data."""
+
+    def test_computes_from_live_memory(self):
+        cluster = PhalaCluster(
+            cluster_name="",
+            instance_type="tdx.medium",
+            memory_per_model_mb=1024,
+            provision_factor=0.8,
+        )
+        client = MagicMock(spec=SpawnteeClient)
+        # CVM reports 8192 MB (different from tdx.medium static 4096 MB)
+        client.capacity.return_value = {
+            "total_memory_mb": 8192,
+            "available_memory_mb": 6000,
+            "accepting_new_models": True,
+            "running_models": 3,
+        }
+
+        max_models, threshold, accepting = cluster._compute_cvm_limits(client)
+
         # (8192 - 500) / 1024 = 7.51 → 7
-        assert cluster.max_models_per_cvm == 7
-        # 7 * 1.0 = 7
-        assert cluster.provision_threshold == 7
+        assert max_models == 7
+        # 7 * 0.8 = 5.6 → 5
+        assert threshold == 5
+        assert accepting is True
+
+    def test_small_cvm_clamped_to_one(self):
+        cluster = PhalaCluster(
+            cluster_name="",
+            instance_type="tdx.medium",
+            memory_per_model_mb=4096,
+        )
+        client = MagicMock(spec=SpawnteeClient)
+        client.capacity.return_value = {
+            "total_memory_mb": 2048,
+            "available_memory_mb": 1000,
+            "accepting_new_models": True,
+        }
+
+        max_models, threshold, accepting = cluster._compute_cvm_limits(client)
+
+        # (2048 - 500) / 4096 = 0.37 → clamped to 1
+        assert max_models == 1
+        assert threshold == 1
+
+    def test_fallback_on_zero_memory(self):
+        """Falls back to static estimate if CVM reports 0 memory."""
+        cluster = PhalaCluster(
+            cluster_name="",
+            instance_type="tdx.medium",  # static: 4096 MB
+            memory_per_model_mb=1024,
+        )
+        client = MagicMock(spec=SpawnteeClient)
+        client.capacity.return_value = {
+            "total_memory_mb": 0,
+            "accepting_new_models": True,
+        }
+
+        max_models, threshold, accepting = cluster._compute_cvm_limits(client)
+
+        # Falls back to static 4096: (4096 - 500) / 1024 = 3.51 → 3
+        assert max_models == 3
+
+    def test_respects_accepting_flag(self):
+        cluster = PhalaCluster(
+            cluster_name="",
+            instance_type="tdx.medium",
+            memory_per_model_mb=512,
+        )
+        client = MagicMock(spec=SpawnteeClient)
+        client.capacity.return_value = {
+            "total_memory_mb": 4096,
+            "available_memory_mb": 500,
+            "accepting_new_models": False,
+        }
+
+        _, _, accepting = cluster._compute_cvm_limits(client)
+        assert accepting is False
 
 
 class TestEnsureCapacity:
@@ -307,43 +361,110 @@ class TestEnsureCapacity:
             memory_per_model_mb=1024,
         )
         client = MagicMock(spec=SpawnteeClient)
-        client.has_capacity.return_value = True
+        # CVM reports 4096 MB total, accepting
+        client.capacity.return_value = {
+            "total_memory_mb": 4096,
+            "available_memory_mb": 3000,
+            "accepting_new_models": True,
+        }
         cluster.cvms = {"cvm1": CVMInfo("cvm1", "reg", client)}
         cluster.head_id = "cvm1"
 
-        # No tasks → 0 models on head, threshold=2 → fine
+        # No tasks → 0 models on head
+        # (4096 - 500) / 1024 = 3.51 → 3, threshold = 3 * 0.8 = 2
+        # 0 < 2 → fine
         cluster.ensure_capacity()
-        client.has_capacity.assert_called_once()
+        client.capacity.assert_called_once()
 
-    def test_orchestrator_threshold_triggers_provision(self):
-        """When head has >= provision_threshold models, provision a new CVM."""
+    def test_live_threshold_triggers_provision(self):
+        """When head has >= live provision_threshold, provision a new CVM."""
         cluster = PhalaCluster(
             cluster_name="test",
-            instance_type="tdx.medium",  # max_per_cvm=3, threshold=2
+            instance_type="tdx.medium",
             memory_per_model_mb=1024,
+            provision_factor=0.8,
         )
         cluster.phala_api_key = ""  # Will fail at provisioning, that's fine
         client = MagicMock(spec=SpawnteeClient)
-        client.has_capacity.return_value = True  # CVM says yes...
+        # CVM reports 4096 MB → max=3, threshold=2
+        client.capacity.return_value = {
+            "total_memory_mb": 4096,
+            "available_memory_mb": 1000,
+            "accepting_new_models": True,  # CVM says yes...
+        }
         cluster.cvms = {"cvm1": CVMInfo("cvm1", "reg", client)}
         cluster.head_id = "cvm1"
 
-        # Assign 2 tasks to head → hits threshold
+        # Assign 2 tasks to head → hits threshold (2 >= 2)
         cluster.task_client_map = {"task-1": "cvm1", "task-2": "cvm1"}
 
         with pytest.raises(PhalaClusterError, match="PHALA_API_KEY"):
             cluster.ensure_capacity()
 
-    def test_cvm_safety_net_triggers_provision(self):
-        """When CVM reports no capacity, provision even if model count is below threshold."""
+    def test_live_memory_prevents_premature_provision(self):
+        """A CVM with more actual RAM than the static map should NOT provision prematurely."""
         cluster = PhalaCluster(
             cluster_name="test",
-            instance_type="tdx.large",  # max_per_cvm=7, threshold=5
+            instance_type="tdx.medium",  # static map: 4096 MB
+            memory_per_model_mb=1024,
+            provision_factor=0.8,
+        )
+        client = MagicMock(spec=SpawnteeClient)
+        # CVM actually has 8192 MB → max=7, threshold=5
+        client.capacity.return_value = {
+            "total_memory_mb": 8192,
+            "available_memory_mb": 5000,
+            "accepting_new_models": True,
+        }
+        cluster.cvms = {"cvm1": CVMInfo("cvm1", "reg", client)}
+        cluster.head_id = "cvm1"
+
+        # 3 tasks on head — would exceed static threshold (2) but NOT live threshold (5)
+        cluster.task_client_map = {"t1": "cvm1", "t2": "cvm1", "t3": "cvm1"}
+
+        # Should NOT provision — still has room
+        cluster.ensure_capacity()
+
+    def test_low_memory_cvm_triggers_sooner(self):
+        """A CVM with less RAM than expected should trigger provision sooner."""
+        cluster = PhalaCluster(
+            cluster_name="test",
+            instance_type="tdx.large",  # static map: 8192 MB
+            memory_per_model_mb=1024,
+            provision_factor=0.8,
+        )
+        cluster.phala_api_key = ""
+        client = MagicMock(spec=SpawnteeClient)
+        # CVM only has 3735 MB (like the real bug) → max=3, threshold=2
+        client.capacity.return_value = {
+            "total_memory_mb": 3735,
+            "available_memory_mb": 1800,
+            "accepting_new_models": True,
+        }
+        cluster.cvms = {"cvm1": CVMInfo("cvm1", "reg", client)}
+        cluster.head_id = "cvm1"
+
+        # 3 tasks → 3 >= threshold(2) → should provision
+        cluster.task_client_map = {"t1": "cvm1", "t2": "cvm1", "t3": "cvm1"}
+
+        with pytest.raises(PhalaClusterError, match="PHALA_API_KEY"):
+            cluster.ensure_capacity()
+
+    def test_cvm_safety_net_triggers_provision(self):
+        """When CVM reports accepting_new_models=false, provision even if model count is below threshold."""
+        cluster = PhalaCluster(
+            cluster_name="test",
+            instance_type="tdx.large",
             memory_per_model_mb=1024,
         )
         cluster.phala_api_key = ""
         client = MagicMock(spec=SpawnteeClient)
-        client.has_capacity.return_value = False  # CVM says no!
+        # CVM reports lots of memory but says NOT accepting
+        client.capacity.return_value = {
+            "total_memory_mb": 8192,
+            "available_memory_mb": 500,
+            "accepting_new_models": False,  # CVM says no!
+        }
         cluster.cvms = {"cvm1": CVMInfo("cvm1", "reg", client)}
         cluster.head_id = "cvm1"
 
@@ -362,7 +483,11 @@ class TestEnsureCapacity:
             max_models=3,
         )
         client = MagicMock(spec=SpawnteeClient)
-        client.has_capacity.return_value = True
+        client.capacity.return_value = {
+            "total_memory_mb": 4096,
+            "available_memory_mb": 3000,
+            "accepting_new_models": True,
+        }
         cluster.cvms = {"cvm1": CVMInfo("cvm1", "reg", client)}
         cluster.head_id = "cvm1"
 
@@ -376,19 +501,23 @@ class TestEnsureCapacity:
         """max_models=0 means no global limit."""
         cluster = PhalaCluster(
             cluster_name="",
-            instance_type="tdx.xlarge",  # max_per_cvm=15
+            instance_type="tdx.xlarge",
             memory_per_model_mb=1024,
             max_models=0,
         )
         client = MagicMock(spec=SpawnteeClient)
-        client.has_capacity.return_value = True
+        # CVM reports 16384 MB → max=15, threshold=12
+        client.capacity.return_value = {
+            "total_memory_mb": 16384,
+            "available_memory_mb": 10000,
+            "accepting_new_models": True,
+        }
         cluster.cvms = {"cvm1": CVMInfo("cvm1", "reg", client)}
         cluster.head_id = "cvm1"
 
-        # 10 tasks, no global cap
+        # 10 tasks, no global cap, under threshold
         cluster.task_client_map = {f"t{i}": "cvm1" for i in range(10)}
 
-        # Under per-CVM threshold (12), has capacity → no provision
         cluster.ensure_capacity()
 
     def test_model_counts(self):
