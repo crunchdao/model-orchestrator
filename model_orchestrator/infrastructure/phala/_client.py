@@ -325,9 +325,14 @@ class SpawnteeClient:
 
     def get_builder_logs(
         self, task_id: str, follow: bool = False, tail: int = 0, from_start: bool = True,
+        stream: bool = False,
     ) -> requests.Response:
         """
         GET /logs/builder/{task_id} — fetch builder logs from spawntee.
+
+        Args:
+            stream: If True, returns a streaming Response (caller must iterate
+                    response.iter_lines() and close the response when done).
 
         Returns the raw Response so the caller can stream or read the body.
         """
@@ -335,14 +340,20 @@ class SpawnteeClient:
         return self._request(
             "GET", f"/logs/builder/{task_id}",
             params=params,
-            max_retries=DEFAULT_MAX_RETRIES,
+            max_retries=DEFAULT_MAX_RETRIES if not stream else 0,
+            stream=stream,
         )
 
     def get_runner_logs(
         self, task_id: str, follow: bool = False, tail: int = 200, from_start: bool = False,
+        stream: bool = False,
     ) -> requests.Response:
         """
         GET /logs/runner/{task_id} — fetch runner logs from spawntee.
+
+        Args:
+            stream: If True, returns a streaming Response (caller must iterate
+                    response.iter_lines() and close the response when done).
 
         Returns the raw Response so the caller can stream or read the body.
         """
@@ -350,5 +361,6 @@ class SpawnteeClient:
         return self._request(
             "GET", f"/logs/runner/{task_id}",
             params=params,
-            max_retries=DEFAULT_MAX_RETRIES,
+            max_retries=DEFAULT_MAX_RETRIES if not stream else 0,
+            stream=stream,
         )

@@ -321,22 +321,44 @@ def _proxy_phala_logs(
     # used in the URI construction in list_models)
     task_id = base64.urlsafe_b64decode(job_id.encode("ascii")).decode("utf-8") if log_type == LogType.builder else job_id
 
+    # Guard against path traversal via crafted base64 values
+    if "/" in task_id or ".." in task_id:
+        raise HTTPException(status_code=400, detail="Invalid job id")
+
     client = cluster.client_for_task(task_id)
+    media_type = "text/plain; charset=utf-8"
+    headers = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
 
     try:
         if log_type == LogType.builder:
             response = client.get_builder_logs(
-                task_id, follow=follow, from_start=from_start,
+                task_id, follow=follow, from_start=from_start, stream=follow,
             )
         else:
             response = client.get_runner_logs(
-                task_id, follow=follow, from_start=from_start,
+                task_id, follow=follow, from_start=from_start, stream=follow,
+            )
+
+        if follow:
+            # Stream chunks from spawntee → client without buffering
+            def _iter_and_close():
+                try:
+                    for line in response.iter_lines(decode_unicode=True):
+                        if line:
+                            yield line + "\n"
+                finally:
+                    response.close()
+
+            return StreamingResponse(
+                _iter_and_close(),
+                media_type=media_type,
+                headers=headers,
             )
 
         return PlainTextResponse(
             content=response.text,
-            media_type="text/plain; charset=utf-8",
-            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+            media_type=media_type,
+            headers=headers,
         )
 
     except SpawnteeClientError as e:
