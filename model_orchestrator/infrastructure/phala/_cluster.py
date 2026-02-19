@@ -33,7 +33,7 @@ import uuid
 
 import requests
 
-from ._client import SpawnteeClient, SpawnteeClientError
+from ._client import SpawnteeAuthenticationError, SpawnteeClient, SpawnteeClientError
 
 try:
     from model_runner_client.security.gateway_credentials import GatewayCredentials
@@ -656,6 +656,8 @@ class PhalaCluster:
                         cvm_name, elapsed,
                     )
                     break
+            except SpawnteeAuthenticationError:
+                raise
             except SpawnteeClientError as e:
                 logger.debug("  ⏳ CVM %s capacity not ready yet: %s", cvm_name, e)
             time.sleep(interval)
