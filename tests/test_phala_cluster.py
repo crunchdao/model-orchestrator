@@ -11,7 +11,7 @@ from model_orchestrator.infrastructure.phala._cluster import (
     PhalaCluster,
     PhalaClusterError,
 )
-from model_orchestrator.infrastructure.phala._client import SpawnteeClient, SpawnteeClientError
+from model_orchestrator.infrastructure.phala._client import SpawnteeClient, SpawnteeClientError  # noqa: F401
 
 
 @pytest.fixture

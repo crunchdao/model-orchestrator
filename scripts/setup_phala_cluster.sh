@@ -6,14 +6,15 @@
 # Assumes cruncher_phala is a sibling directory (../cruncher_phala).
 #
 # Prerequisites:
-#   - Auth middleware must already be committed in cruncher_phala (spawntee/src/main.py)
-#   - Token support must already be committed in orchestrator (_client.py, _cluster.py)
-#   - Docker image with auth support must be pushed to Docker Hub
+#   - Gateway auth middleware must already be committed in cruncher_phala (spawntee/src/main.py)
+#   - Gateway credentials support must already be committed in orchestrator (_client.py, _cluster.py)
+#   - Docker image with gateway auth support must be pushed to Docker Hub
+#   - Coordinator RSA certificates must be available (key.pem or tls.key)
 #
 # What this script does:
-#   1. Verify environment (repos, tools, code changes in place)
-#   2. Collect configuration (AWS creds, Phala API key, etc.)
-#   3. Generate SPAWNTEE_API_TOKEN + write env files
+#   1. Verify environment (repos, tools, coordinator certs, code changes in place)
+#   2. Collect configuration (AWS creds, Phala API key, coordinator wallet, etc.)
+#   3. Write env files
 #   4. Build & push Docker image (optional)
 #   5. Deploy registry CVM
 #   6. Deploy runner CVM
@@ -76,33 +77,68 @@ for cmd in phala python3 openssl curl; do
 done
 info "All required tools found (phala, python3, openssl, curl)"
 
-# Check that auth code changes are already committed
-MISSING=""
-if ! grep -q "SPAWNTEE_API_TOKEN" "$PHALA_ROOT/spawntee/src/main.py"; then
-    MISSING="$MISSING\n  - cruncher_phala/spawntee/src/main.py (auth middleware)"
+# Check coordinator certificates
+GATEWAY_CERT_DIR="${GATEWAY_CERT_DIR:-}"
+if [[ -z "$GATEWAY_CERT_DIR" ]]; then
+    GATEWAY_CERT_DIR=$(ask "Path to coordinator cert directory (containing key.pem or tls.key): ")
 fi
-if ! grep -q "SPAWNTEE_API_TOKEN" "$PHALA_ROOT/spawntee/docker-compose.phala.debug.yml"; then
+
+if [[ ! -d "$GATEWAY_CERT_DIR" ]]; then
+    err "Coordinator cert directory not found: $GATEWAY_CERT_DIR"
+    echo ""
+    echo "The coordinator RSA private key is required for gateway auth."
+    echo "This is the same key used to sign gRPC calls to model containers."
+    exit 1
+fi
+
+# Find the key file (key.pem or tls.key)
+CERT_KEY_FILE=""
+if [[ -f "$GATEWAY_CERT_DIR/key.pem" ]]; then
+    CERT_KEY_FILE="$GATEWAY_CERT_DIR/key.pem"
+elif [[ -f "$GATEWAY_CERT_DIR/tls.key" ]]; then
+    CERT_KEY_FILE="$GATEWAY_CERT_DIR/tls.key"
+fi
+
+if [[ -z "$CERT_KEY_FILE" ]]; then
+    err "No key.pem or tls.key found in $GATEWAY_CERT_DIR"
+    echo ""
+    echo "The coordinator RSA private key must be present as key.pem or tls.key."
+    exit 1
+fi
+
+# Validate the key is actually an RSA private key
+if ! openssl rsa -in "$CERT_KEY_FILE" -check -noout >/dev/null 2>&1; then
+    err "$CERT_KEY_FILE is not a valid RSA private key"
+    exit 1
+fi
+info "Coordinator RSA key verified: $CERT_KEY_FILE"
+
+# Check that gateway auth code changes are already committed
+MISSING=""
+if ! grep -q "GATEWAY_AUTH_COORDINATOR_WALLET" "$PHALA_ROOT/spawntee/src/main.py"; then
+    MISSING="$MISSING\n  - cruncher_phala/spawntee/src/main.py (gateway auth middleware)"
+fi
+if ! grep -q "GATEWAY_AUTH_COORDINATOR_WALLET" "$PHALA_ROOT/spawntee/docker-compose.phala.debug.yml"; then
     MISSING="$MISSING\n  - cruncher_phala/spawntee/docker-compose.phala.debug.yml (env var)"
 fi
-if ! grep -q "SPAWNTEE_API_TOKEN" "$PHALA_ROOT/spawntee/docker-compose.phala.runner.yml"; then
+if ! grep -q "GATEWAY_AUTH_COORDINATOR_WALLET" "$PHALA_ROOT/spawntee/docker-compose.phala.runner.yml"; then
     MISSING="$MISSING\n  - cruncher_phala/spawntee/docker-compose.phala.runner.yml (env var)"
 fi
-if ! grep -q "api_token" "$ORCH_ROOT/model_orchestrator/infrastructure/phala/_client.py"; then
-    MISSING="$MISSING\n  - model-orchestrator-new/_client.py (api_token parameter)"
+if ! grep -q "gateway_credentials" "$ORCH_ROOT/model_orchestrator/infrastructure/phala/_client.py"; then
+    MISSING="$MISSING\n  - model-orchestrator-new/_client.py (gateway_credentials parameter)"
 fi
-if ! grep -q "spawntee_api_token" "$ORCH_ROOT/model_orchestrator/infrastructure/phala/_cluster.py"; then
-    MISSING="$MISSING\n  - model-orchestrator-new/_cluster.py (spawntee_api_token)"
+if ! grep -q "gateway_credentials" "$ORCH_ROOT/model_orchestrator/infrastructure/phala/_cluster.py"; then
+    MISSING="$MISSING\n  - model-orchestrator-new/_cluster.py (gateway_credentials)"
 fi
 
 if [[ -n "$MISSING" ]]; then
-    err "Auth code changes are missing from the following files:"
+    err "Gateway auth code changes are missing from the following files:"
     echo -e "$MISSING"
     echo ""
     echo "These code changes must be committed before running this script."
-    echo "See docs/api-security-plan.md for the required changes."
     exit 1
 fi
-info "Auth code changes verified in both repos"
+info "Gateway auth code changes verified in both repos"
 
 # ── Phase 2: Collect configuration ───────────────────────────
 
@@ -182,12 +218,15 @@ fi
 
 echo ""
 
-# Generate API token (reuse if already set)
-if [[ -z "${SPAWNTEE_API_TOKEN:-}" ]]; then
-    SPAWNTEE_API_TOKEN=$(openssl rand -hex 32)
-    info "Generated SPAWNTEE_API_TOKEN: ${SPAWNTEE_API_TOKEN:0:8}...${SPAWNTEE_API_TOKEN:56}"
+# Coordinator wallet address (for on-chain cert hash lookup)
+if [[ -z "${GATEWAY_AUTH_COORDINATOR_WALLET:-}" ]]; then
+    GATEWAY_AUTH_COORDINATOR_WALLET=$(ask "Coordinator wallet address (Solana pubkey): ")
+    if [[ -z "$GATEWAY_AUTH_COORDINATOR_WALLET" ]]; then
+        err "GATEWAY_AUTH_COORDINATOR_WALLET is required for gateway auth"
+        exit 1
+    fi
 else
-    info "SPAWNTEE_API_TOKEN is set (from env): ${SPAWNTEE_API_TOKEN:0:8}..."
+    info "GATEWAY_AUTH_COORDINATOR_WALLET is set: $GATEWAY_AUTH_COORDINATOR_WALLET"
 fi
 
 echo ""
@@ -195,7 +234,8 @@ echo -e "${BOLD}Configuration summary:${NC}"
 echo "  AWS_REGION:          $AWS_REGION"
 echo "  CLUSTER_NAME:        $CLUSTER_NAME"
 echo "  INSTANCE_TYPE:       $INSTANCE_TYPE"
-echo "  SPAWNTEE_API_TOKEN:  ${SPAWNTEE_API_TOKEN:0:8}..."
+echo "  GATEWAY_CERT_DIR:    $GATEWAY_CERT_DIR"
+echo "  COORDINATOR_WALLET:  $GATEWAY_AUTH_COORDINATOR_WALLET"
 echo ""
 
 if ! confirm "Proceed with this configuration?"; then
@@ -211,7 +251,8 @@ AWS_REGION=$AWS_REGION
 PHALA_API_KEY=$PHALA_API_KEY
 CLUSTER_NAME=$CLUSTER_NAME
 INSTANCE_TYPE=$INSTANCE_TYPE
-SPAWNTEE_API_TOKEN=$SPAWNTEE_API_TOKEN
+GATEWAY_CERT_DIR=$GATEWAY_CERT_DIR
+GATEWAY_AUTH_COORDINATOR_WALLET=$GATEWAY_AUTH_COORDINATOR_WALLET
 EOF
 chmod 600 "$SETUP_ENV"
 info "Configuration saved to $SETUP_ENV (for re-runs)"
@@ -231,7 +272,7 @@ cat > "$ENV_SECRET" <<EOF
 AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
 AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
 AWS_REGION=$AWS_REGION
-SPAWNTEE_API_TOKEN=$SPAWNTEE_API_TOKEN
+GATEWAY_AUTH_COORDINATOR_WALLET=$GATEWAY_AUTH_COORDINATOR_WALLET
 EOF
 info "Wrote $ENV_SECRET"
 
@@ -328,7 +369,7 @@ else
         -e "AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID" \
         -e "AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY" \
         -e "AWS_REGION=$AWS_REGION" \
-        -e "SPAWNTEE_API_TOKEN=$SPAWNTEE_API_TOKEN" \
+        -e "GATEWAY_AUTH_COORDINATOR_WALLET=$GATEWAY_AUTH_COORDINATOR_WALLET" \
         --api-key "$PHALA_API_KEY" \
         --json \
         --wait \
@@ -424,7 +465,7 @@ RUNNER_DEPLOY_OUT=$(phala deploy \
     --instance-type "$INSTANCE_TYPE" \
     --compose "$PHALA_ROOT/spawntee/docker-compose.phala.runner.yml" \
     -e "REGISTRY_URL=$REGISTRY_URL" \
-    -e "SPAWNTEE_API_TOKEN=$SPAWNTEE_API_TOKEN" \
+    -e "GATEWAY_AUTH_COORDINATOR_WALLET=$GATEWAY_AUTH_COORDINATOR_WALLET" \
     --api-key "$PHALA_API_KEY" \
     --json \
     --wait \
@@ -523,7 +564,7 @@ else
         -e "AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID" \
         -e "AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY" \
         -e "AWS_REGION=$AWS_REGION" \
-        -e "SPAWNTEE_API_TOKEN=$SPAWNTEE_API_TOKEN" \
+        -e "GATEWAY_AUTH_COORDINATOR_WALLET=$GATEWAY_AUTH_COORDINATOR_WALLET" \
         -e "APPROVED_COMPOSE_HASH=$COMPOSE_HASH" \
         --api-key "$PHALA_API_KEY" \
         2>&1 || {
@@ -565,7 +606,8 @@ cat > "$ORCH_ENV" <<EOF
 # Crunch TEE cluster configuration
 
 PHALA_API_KEY=$PHALA_API_KEY
-SPAWNTEE_API_TOKEN=$SPAWNTEE_API_TOKEN
+GATEWAY_CERT_DIR=$GATEWAY_CERT_DIR
+GATEWAY_AUTH_COORDINATOR_WALLET=$GATEWAY_AUTH_COORDINATOR_WALLET
 EOF
 info "Wrote orchestrator .env"
 
@@ -579,20 +621,48 @@ echo "Testing registry endpoints..."
 REGISTRY_HEALTH=$(curl -sf "$REGISTRY_URL/health" 2>/dev/null) || REGISTRY_HEALTH="UNREACHABLE"
 echo "  Registry /health: $REGISTRY_HEALTH"
 
-# Auth required (should fail without token)
+# Auth required (should fail without signed headers)
 NOAUTH_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$REGISTRY_URL/running_models" 2>/dev/null) || NOAUTH_CODE="000"
-AUTH_CODE=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $SPAWNTEE_API_TOKEN" "$REGISTRY_URL/running_models" 2>/dev/null) || AUTH_CODE="000"
 
 if [[ "$NOAUTH_CODE" == "401" ]]; then
-    info "Auth enforcement works: /running_models without token → 401"
+    info "Gateway auth enforcement works: /running_models without auth → 401"
 else
-    warn "/running_models without token returned $NOAUTH_CODE (expected 401). CVM may still be restarting."
+    warn "/running_models without auth returned $NOAUTH_CODE (expected 401). CVM may still be restarting."
 fi
 
+# Test with signed request (requires Python + cryptography)
+AUTH_CODE=$(python3 -c "
+import base64, json, time, hashlib, sys
+from pathlib import Path
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.primitives.serialization import load_pem_private_key, Encoding, PublicFormat
+import urllib.request
+
+key_pem = Path('$CERT_KEY_FILE').read_bytes()
+pk = load_pem_private_key(key_pem, password=None)
+payload = json.dumps({'path':'/running_models','timestamp':int(time.time())},separators=(',',':')).encode()
+sig = pk.sign(payload, padding.PKCS1v15(), hashes.SHA256())
+pub = pk.public_key().public_bytes(Encoding.DER, PublicFormat.SubjectPublicKeyInfo)
+req = urllib.request.Request('$REGISTRY_URL/running_models')
+req.add_header('X-Gateway-Auth-Message', base64.b64encode(payload).decode())
+req.add_header('X-Gateway-Auth-Signature', base64.b64encode(sig).decode())
+req.add_header('X-Gateway-Auth-Pubkey', base64.b64encode(pub).decode())
+import ssl
+ctx = ssl.create_default_context()
+try:
+    resp = urllib.request.urlopen(req, context=ctx)
+    print(resp.status)
+except urllib.error.HTTPError as e:
+    print(e.code)
+except Exception as e:
+    print('000')
+" 2>/dev/null) || AUTH_CODE="000"
+
 if [[ "$AUTH_CODE" == "200" ]]; then
-    info "Auth works: /running_models with token → 200"
+    info "Gateway auth works: /running_models with signed request → 200"
 else
-    warn "/running_models with token returned $AUTH_CODE (expected 200)"
+    warn "/running_models with signed request returned $AUTH_CODE (expected 200)"
 fi
 
 # ── Final summary ─────────────────────────────────────────────
@@ -607,11 +677,13 @@ ${BOLD}Registry CVM:${NC}
   Mode:          registry+runner (serves keys, runs models)
   Compose hash:  ${COMPOSE_HASH:-UNKNOWN} (approved for future runners)
 
-${BOLD}Secrets:${NC}
-  SPAWNTEE_API_TOKEN:  ${SPAWNTEE_API_TOKEN:0:8}...${SPAWNTEE_API_TOKEN:56}
+${BOLD}Authentication:${NC}
+  GATEWAY_CERT_DIR:             $GATEWAY_CERT_DIR
+  COORDINATOR_WALLET:           $GATEWAY_AUTH_COORDINATOR_WALLET
+  Auth method:                  Coordinator RSA cert signature (same as gRPC)
   Stored in:
-    - $PHALA_ROOT/spawntee/.env.secret  (CVM deploys)
-    - $ORCH_ROOT/.env                   (orchestrator)
+    - $PHALA_ROOT/spawntee/.env.secret  (CVM deploys — wallet address)
+    - $ORCH_ROOT/.env                   (orchestrator — cert dir + wallet)
 
 ${BOLD}Orchestrator config:${NC}
   Set these in your orchestrator YAML config:

@@ -22,15 +22,23 @@ Capacity planning:
     A global max_models cap prevents unbounded cluster growth.
 """
 
+from __future__ import annotations
+
 import math
-import os
 import logging
+import os
+from pathlib import Path
 import threading
 import uuid
 
 import requests
 
 from ._client import SpawnteeClient, SpawnteeClientError
+
+try:
+    from model_runner_client.security.gateway_credentials import GatewayCredentials
+except ImportError:
+    GatewayCredentials = None  # type: ignore[misc,assignment]
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +106,7 @@ class PhalaCluster:
         memory_per_model_mb: int = 1024,
         provision_factor: float = 0.8,
         max_models: int = 0,
+        gateway_cert_dir: str | None = None,
     ):
         """
         Args:
@@ -119,8 +128,32 @@ class PhalaCluster:
         self.request_timeout = request_timeout
         self.phala_api_url = phala_api_url or DEFAULT_PHALA_API_URL
         self.phala_api_key = os.environ.get("PHALA_API_KEY", "")
-        self.spawntee_api_token = os.environ.get("SPAWNTEE_API_TOKEN", "")
         self.runner_compose_path = runner_compose_path
+
+        # Load coordinator gateway credentials for spawntee API auth.
+        # Parameter takes priority over env var.
+        cert_dir = gateway_cert_dir or os.environ.get("GATEWAY_CERT_DIR", "")
+        if cert_dir:
+            if GatewayCredentials is None:
+                raise PhalaClusterError(
+                    "GATEWAY_CERT_DIR is set but model_runner_client is not installed. "
+                    "Install it with: pip install model-runner-client"
+                )
+            # Try key.pem first, then tls.key (common in cert deploy dirs)
+            key_path = Path(cert_dir) / "key.pem"
+            if not key_path.exists():
+                key_path = Path(cert_dir) / "tls.key"
+            if key_path.exists():
+                self.gateway_credentials = GatewayCredentials.from_pem(
+                    key_pem=key_path.read_bytes(),
+                )
+                logger.info("🔑 Loaded gateway credentials from %s", key_path)
+            else:
+                raise PhalaClusterError(
+                    f"GATEWAY_CERT_DIR={cert_dir} set but no key.pem or tls.key found"
+                )
+        else:
+            self.gateway_credentials = None
         # Capacity planning
         self.instance_type = instance_type
         self.memory_per_model_mb = memory_per_model_mb
@@ -235,7 +268,7 @@ class PhalaCluster:
                 cluster_url_template=url_template,
                 spawntee_port=self.spawntee_port,
                 timeout=self.request_timeout,
-                api_token=self.spawntee_api_token,
+                gateway_credentials=self.gateway_credentials,
             )
 
             # Probe health to get mode
@@ -457,6 +490,8 @@ class PhalaCluster:
         registry_url = f"https://{registry_cvm.app_id}-{self.spawntee_port}.dstack-pha-{registry_cvm.node_name}.phala.network"
 
         # Deploy via phala CLI (handles compose hashing, API format, etc.)
+        coordinator_wallet = os.environ.get("GATEWAY_AUTH_COORDINATOR_WALLET", "")
+
         cmd = [
             "phala", "deploy",
             "--name", cvm_name,
@@ -465,8 +500,8 @@ class PhalaCluster:
             "-e", f"REGISTRY_URL={registry_url}",
             "-e", f"CAPACITY_THRESHOLD={os.environ.get('CAPACITY_THRESHOLD', '0.8')}",
         ]
-        if self.spawntee_api_token:
-            cmd.extend(["-e", f"SPAWNTEE_API_TOKEN={self.spawntee_api_token}"])
+        if coordinator_wallet:
+            cmd.extend(["-e", f"GATEWAY_AUTH_COORDINATOR_WALLET={coordinator_wallet}"])
         cmd.extend(["--json", "--wait"])
 
         logger.info("  Running: %s", " ".join(cmd))
@@ -524,7 +559,7 @@ class PhalaCluster:
             cluster_url_template=url_template,
             spawntee_port=self.spawntee_port,
             timeout=self.request_timeout,
-            api_token=self.spawntee_api_token,
+            gateway_credentials=self.gateway_credentials,
         )
 
         max_wait = 180  # 3 minutes

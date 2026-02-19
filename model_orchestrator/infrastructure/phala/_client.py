@@ -3,14 +3,32 @@ HTTP client for the Phala spawntee TEE service.
 
 Provides methods to call all spawntee API endpoints:
 build-model, start-model, stop-model, task status, running models, keypair.
+
+Authentication uses the coordinator's RSA cert signature (same key that
+signs gRPC calls to model containers). Each request is signed with
+X-Gateway-Auth-* headers containing a timestamped payload, RSA signature,
+and public key. The spawntee verifies the public key hash against on-chain
+cert hashes.
 """
 
+from __future__ import annotations
+
+import base64
+import json
 import time
+from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
 import requests
 
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+
 from ...utils.logging_utils import get_logger
+
+if TYPE_CHECKING:
+    from model_runner_client.security.gateway_credentials import GatewayCredentials
 
 logger = get_logger()
 
@@ -32,8 +50,9 @@ class SpawnteeAuthenticationError(SpawnteeClientError):
     """Raised on 401/403 from spawntee — indicates a critical config error.
 
     This must NOT be caught and silently ignored. An authentication failure
-    means the SPAWNTEE_API_TOKEN is wrong or missing, and the orchestrator
-    cannot safely make any decisions (capacity, routing, provisioning).
+    means the coordinator RSA key is wrong, missing, or its cert hash is not
+    registered on-chain. The orchestrator cannot safely make any decisions
+    (capacity, routing, provisioning).
     """
     pass
 
@@ -49,23 +68,36 @@ class SpawnteeClient:
         https://<hash>-<port>.<domain>
     """
 
-    def __init__(self, cluster_url_template: str, spawntee_port: int = 9010, timeout: int = 30, api_token: str = ""):
+    def __init__(
+        self,
+        cluster_url_template: str,
+        spawntee_port: int = 9010,
+        timeout: int = 30,
+        gateway_credentials: GatewayCredentials | None = None,
+    ):
         """
         Args:
             cluster_url_template: CVM URL template with <model-port> placeholder,
                 e.g. "https://abc123-<model-port>.dstack-prod4.phala.network"
             spawntee_port: Port where the spawntee API listens (default 9010)
             timeout: HTTP request timeout in seconds
-            api_token: Bearer token for spawntee API authentication.
-                       When set, sent as Authorization header on every request.
+            gateway_credentials: Coordinator RSA credentials for gateway auth signing.
+                When set, each request is signed with X-Gateway-Auth-* headers.
         """
         self._cluster_url_template = cluster_url_template
         self._spawntee_port = spawntee_port
         self._timeout = timeout
         self._base_url = self._build_url(spawntee_port)
         self._session = requests.Session()
-        if api_token:
-            self._session.headers["Authorization"] = f"Bearer {api_token}"
+        self._gateway_credentials = gateway_credentials
+        # Pre-compute base64-encoded DER public key (doesn't change per request)
+        if gateway_credentials:
+            pubkey_der = gateway_credentials.private_key.public_key().public_bytes(
+                Encoding.DER, PublicFormat.SubjectPublicKeyInfo
+            )
+            self._pubkey_b64 = base64.b64encode(pubkey_der).decode()
+        else:
+            self._pubkey_b64 = ""
 
     def _build_url(self, port: int) -> str:
         """Build a full URL by substituting the port into the template."""
@@ -88,6 +120,31 @@ class SpawnteeClient:
         url = self._build_url(port)
         parsed = urlparse(url)
         return parsed.hostname, 443
+
+    def _build_auth_headers(self, path: str) -> dict[str, str]:
+        """Sign a request with the coordinator RSA key.
+
+        Produces the same header format as the gRPC GatewayAuthClientInterceptor:
+        a JSON payload with a timestamp, signed with RSA PKCS#1v15 + SHA-256.
+
+        Raises RuntimeError if called without gateway credentials configured.
+        """
+        if not self._gateway_credentials:
+            raise RuntimeError(
+                "_build_auth_headers called but no gateway credentials configured"
+            )
+        payload = json.dumps(
+            {"path": path, "timestamp": int(time.time())},
+            separators=(",", ":"),
+        ).encode()
+        signature = self._gateway_credentials.private_key.sign(
+            payload, padding.PKCS1v15(), hashes.SHA256()
+        )
+        return {
+            "X-Gateway-Auth-Message": base64.b64encode(payload).decode(),
+            "X-Gateway-Auth-Signature": base64.b64encode(signature).decode(),
+            "X-Gateway-Auth-Pubkey": self._pubkey_b64,
+        }
 
     def _request(
         self,
@@ -115,6 +172,14 @@ class SpawnteeClient:
         last_error: SpawnteeClientError | None = None
 
         for attempt in range(1 + max_retries):
+            # Inject gateway auth headers per attempt (fresh timestamp each time)
+            if self._gateway_credentials:
+                auth_headers = self._build_auth_headers(path)
+                if "headers" in kwargs:
+                    kwargs["headers"].update(auth_headers)
+                else:
+                    kwargs["headers"] = auth_headers
+
             try:
                 response = self._session.request(method, url, **kwargs)
             except requests.ConnectionError as e:
@@ -131,7 +196,7 @@ class SpawnteeClient:
                 if response.status_code in (401, 403):
                     raise SpawnteeAuthenticationError(
                         f"Spawntee authentication failed ({response.status_code}): {response.text}. "
-                        f"Check SPAWNTEE_API_TOKEN configuration.",
+                        f"Check coordinator RSA key and on-chain cert hash configuration.",
                         status_code=response.status_code,
                         response_body=response.text,
                     )
