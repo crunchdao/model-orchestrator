@@ -27,7 +27,14 @@ from ...utils.logging_utils import get_logger
 from ...utils.unique_slug import generate_unique_coolname
 
 logger = get_logger()
-docker_client = docker.from_env()
+_docker_client = None
+
+
+def _get_docker_client():
+    global _docker_client
+    if _docker_client is None:
+        _docker_client = docker.from_env()
+    return _docker_client
 
 
 async def process_uploaded_files(
@@ -94,7 +101,7 @@ async def follow_file(path: str, follow: bool, from_start: bool):
 
 
 def follow_container_logs(container_id: str, follow: bool, from_start: bool) -> Iterator[bytes]:
-    container = docker_client.containers.get(container_id)
+    container = _get_docker_client().containers.get(container_id)
     tail = "all" if from_start else 0
 
     # bytes chunks (stdout+stderr)
