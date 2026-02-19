@@ -4,19 +4,22 @@ import shutil
 import asyncio
 import urllib.parse
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
-from typing import List, Iterator, Optional
+from typing import List, Iterator, Optional, TYPE_CHECKING
 
 import base58
 import docker
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Query, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, PlainTextResponse
 
 from ...configuration import AppConfig
 from ...infrastructure.config_watcher import ModelStateConfigYamlPolling
 from ...mediators.models_state_mediator import ModelsStateMediator
+
+if TYPE_CHECKING:
+    from ...infrastructure.phala._cluster import PhalaCluster
 
 from ._types import *
 from ...utils.loader import import_notebook
@@ -108,7 +111,8 @@ def follow_container_logs(container_id: str, follow: bool, from_start: bool) -> 
 class LocalDeployServices:
     model_state_mediator: ModelsStateMediator
     app_config: AppConfig
-    model_state_config: ModelStateConfigYamlPolling
+    model_state_config: ModelStateConfigYamlPolling | None = None
+    phala_cluster: "PhalaCluster | None" = None
 
 
 def create_local_deploy_api(services: LocalDeployServices) -> FastAPI:
@@ -144,6 +148,9 @@ def create_local_deploy_api(services: LocalDeployServices) -> FastAPI:
         cruncher_name: Optional[str] = Form(None),
         files: List[UploadFile] = File(...),
     ):
+        if svc.model_state_config is None:
+            raise HTTPException(status_code=501, detail="Model upload not supported in this mode")
+
         runner_config = svc.app_config.infrastructure.runner
 
         submission_name, _ = await process_uploaded_files(files, runner_config)
@@ -189,6 +196,9 @@ def create_local_deploy_api(services: LocalDeployServices) -> FastAPI:
         cruncher_name: Optional[str] = Form(None),
         files: Optional[List[UploadFile]] = File(None),
     ):
+
+        if svc.model_state_config is None:
+            raise HTTPException(status_code=501, detail="Model update not supported in this mode")
 
         model_config = svc.model_state_config.fetch_config(model_id)
         if not model_config:
@@ -257,10 +267,16 @@ def create_local_deploy_api(services: LocalDeployServices) -> FastAPI:
         job_id: str,
         follow: bool = Query(False),
         from_start: bool = Query(False),
+        svc: LocalDeployServices = Depends(get_services),
     ):
         media_type = "text/plain; charset=utf-8"
         headers = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
 
+        # ── Phala mode: proxy to spawntee log endpoints ──
+        if svc.phala_cluster is not None:
+            return _proxy_phala_logs(svc.phala_cluster, type, job_id, follow, from_start)
+
+        # ── Local mode: read from local files / Docker containers ──
         if type == LogType.builder:
             import tempfile
             temp_dir = tempfile.gettempdir()
@@ -282,3 +298,40 @@ def create_local_deploy_api(services: LocalDeployServices) -> FastAPI:
             raise HTTPException(status_code=400, detail="Invalid log type")
 
     return app
+
+
+def _proxy_phala_logs(
+    cluster: "PhalaCluster",
+    log_type: LogType,
+    job_id: str,
+    follow: bool,
+    from_start: bool,
+):
+    """Proxy a log request to the spawntee CVM that owns the task."""
+    from ..phala._client import SpawnteeClientError
+
+    # For builder logs, job_id is base64-encoded task_id (same encoding
+    # used in the URI construction in list_models)
+    task_id = base64.urlsafe_b64decode(job_id.encode("ascii")).decode("utf-8") if log_type == LogType.builder else job_id
+
+    client = cluster.client_for_task(task_id)
+
+    try:
+        if log_type == LogType.builder:
+            response = client.get_builder_logs(
+                task_id, follow=follow, from_start=from_start,
+            )
+        else:
+            response = client.get_runner_logs(
+                task_id, follow=follow, from_start=from_start,
+            )
+
+        return PlainTextResponse(
+            content=response.text,
+            media_type="text/plain; charset=utf-8",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+
+    except SpawnteeClientError as e:
+        status = e.status_code or 502
+        raise HTTPException(status_code=status, detail=f"Failed to fetch logs from TEE: {e}")

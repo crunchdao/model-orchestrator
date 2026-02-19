@@ -322,3 +322,33 @@ class SpawnteeClient:
         the caller must not make capacity decisions without a real answer.
         """
         return self.capacity().get("accepting_new_models", False)
+
+    def get_builder_logs(
+        self, task_id: str, follow: bool = False, tail: int = 0, from_start: bool = True,
+    ) -> requests.Response:
+        """
+        GET /logs/builder/{task_id} — fetch builder logs from spawntee.
+
+        Returns the raw Response so the caller can stream or read the body.
+        """
+        params = {"follow": str(follow).lower(), "tail": str(tail), "from_start": str(from_start).lower()}
+        return self._request(
+            "GET", f"/logs/builder/{task_id}",
+            params=params,
+            max_retries=DEFAULT_MAX_RETRIES,
+        )
+
+    def get_runner_logs(
+        self, task_id: str, follow: bool = False, tail: int = 200, from_start: bool = False,
+    ) -> requests.Response:
+        """
+        GET /logs/runner/{task_id} — fetch runner logs from spawntee.
+
+        Returns the raw Response so the caller can stream or read the body.
+        """
+        params = {"follow": str(follow).lower(), "tail": str(tail), "from_start": str(from_start).lower()}
+        return self._request(
+            "GET", f"/logs/runner/{task_id}",
+            params=params,
+            max_retries=DEFAULT_MAX_RETRIES,
+        )
