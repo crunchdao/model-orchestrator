@@ -626,34 +626,38 @@ class PhalaCluster:
         #   2. /capacity → accepting_new_models: true  (Docker, nginx, full stack ready)
         # Without stage 2, builds routed to the new head can fail because
         # Docker-in-Docker hasn't finished initializing yet.
+        #
+        # Uses wall-clock time (not loop-count) because each HTTP request
+        # can take 30+ seconds with internal retries and backoff.
         max_wait = 180  # 3 minutes total for both stages
-        elapsed = 0
         interval = 10
+        deadline = time.monotonic() + max_wait
 
         # Stage 1: wait for healthy
-        while elapsed < max_wait:
+        while time.monotonic() < deadline:
             try:
                 health = new_client.health()
                 if health.get("status") == "healthy":
-                    logger.info("  ✅ CVM %s is healthy (took %ds)", cvm_name, elapsed)
+                    elapsed = max_wait - (deadline - time.monotonic())
+                    logger.info("  ✅ CVM %s is healthy (took %ds)", cvm_name, int(elapsed))
                     break
             except SpawnteeClientError:
                 pass
             time.sleep(interval)
-            elapsed += interval
         else:
             raise PhalaClusterError(
                 f"CVM {cvm_name} did not become healthy within {max_wait}s"
             )
 
         # Stage 2: wait for capacity (full readiness)
-        while elapsed < max_wait:
+        while time.monotonic() < deadline:
             try:
                 cap = new_client.capacity()
                 if cap.get("accepting_new_models"):
+                    elapsed = max_wait - (deadline - time.monotonic())
                     logger.info(
                         "  ✅ CVM %s is ready (accepting models, took %ds total)",
-                        cvm_name, elapsed,
+                        cvm_name, int(elapsed),
                     )
                     break
             except SpawnteeAuthenticationError:
@@ -661,7 +665,6 @@ class PhalaCluster:
             except SpawnteeClientError as e:
                 logger.debug("  ⏳ CVM %s capacity not ready yet: %s", cvm_name, e)
             time.sleep(interval)
-            elapsed += interval
         else:
             raise PhalaClusterError(
                 f"CVM {cvm_name} is healthy but not accepting models within {max_wait}s"
