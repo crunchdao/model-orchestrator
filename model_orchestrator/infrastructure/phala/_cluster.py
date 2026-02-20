@@ -634,6 +634,7 @@ class PhalaCluster:
         deadline = time.monotonic() + max_wait
 
         # Stage 1: wait for healthy
+        ready = False
         while time.monotonic() < deadline:
             try:
                 health = new_client.health()
@@ -645,9 +646,8 @@ class PhalaCluster:
                 pass
             time.sleep(interval)
         else:
-            raise PhalaClusterError(
-                f"CVM {cvm_name} did not become healthy within {max_wait}s"
-            )
+            self._cleanup_failed_runner(new_app_id, cvm_name, "never became healthy")
+            return
 
         # Stage 2: wait for capacity (full readiness)
         while time.monotonic() < deadline:
@@ -659,6 +659,7 @@ class PhalaCluster:
                         "  ✅ CVM %s is ready (accepting models, took %ds total)",
                         cvm_name, int(elapsed),
                     )
+                    ready = True
                     break
             except SpawnteeAuthenticationError:
                 raise
@@ -666,9 +667,11 @@ class PhalaCluster:
                 logger.debug("  ⏳ CVM %s capacity not ready yet: %s", cvm_name, e)
             time.sleep(interval)
         else:
-            raise PhalaClusterError(
-                f"CVM {cvm_name} is healthy but not accepting models within {max_wait}s"
-            )
+            self._cleanup_failed_runner(new_app_id, cvm_name, "healthy but not accepting models")
+            return
+
+        if not ready:
+            return
 
         # Add to cluster and make it the new head
         cvm_info = CVMInfo(
@@ -681,3 +684,37 @@ class PhalaCluster:
         self.cvms[new_app_id] = cvm_info
         self.head_id = new_app_id
         logger.info("  📍 New head CVM: %s (%s)", cvm_name, new_app_id)
+
+    def _cleanup_failed_runner(self, app_id: str, name: str, reason: str):
+        """Clean up a runner CVM that failed to become ready."""
+        import subprocess
+
+        logger.error(
+            "  ❌ CVM %s (%s) failed: %s. Deleting and falling back to existing head.",
+            name, app_id, reason,
+        )
+
+        # Remove from cluster state (it was never added, but be safe)
+        self.cvms.pop(app_id, None)
+        if self.head_id == app_id:
+            # Revert to the registry as head
+            registry = next((c for c in self.cvms.values() if "registry" in c.mode), None)
+            if registry:
+                self.head_id = registry.app_id
+                logger.info("  📍 Reverted head to registry: %s", registry.name)
+            elif self.cvms:
+                self.head_id = next(iter(self.cvms))
+            else:
+                self.head_id = None
+
+        # Best-effort delete from Phala Cloud
+        try:
+            subprocess.run(
+                ["phala", "cvms", "delete", app_id, "--force"],
+                capture_output=True, text=True, timeout=30,
+                env={**os.environ, "PHALA_API_KEY": self.phala_api_key,
+                     "PHALA_CLOUD_API_KEY": self.phala_api_key},
+            )
+            logger.info("  🗑️ Deleted failed CVM %s from Phala Cloud", name)
+        except Exception as e:
+            logger.warning("  ⚠️ Could not delete failed CVM %s: %s", name, e)
