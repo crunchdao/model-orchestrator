@@ -235,7 +235,12 @@ class PhalaCluster:
         # Push runner compose hashes to the registry so it can verify
         # re-encryption attestation. This is idempotent and ensures the
         # registry has the correct hashes even after a restart.
-        self._approve_runner_hashes_on_registry()
+        # Best-effort during discover — the APPROVED_COMPOSE_HASH env var
+        # may still work, and _provision_new_runner will retry.
+        try:
+            self._approve_runner_hashes_on_registry()
+        except (requests.RequestException, SpawnteeClientError) as e:
+            logger.warning("⚠️ Could not approve runner hashes during discover (will retry on provision): %s", e)
 
     def _discover_from_api(self):
         """Query Phala Cloud API for CVMs matching our cluster name prefix."""
@@ -381,8 +386,9 @@ class PhalaCluster:
                 result.get("approved_count", len(unique_hashes)),
                 registry.name,
             )
-        except Exception as e:
+        except (requests.RequestException, SpawnteeClientError) as e:
             logger.error("❌ Failed to approve hashes on registry: %s", e)
+            raise
 
     # ─── Task routing ───
 
@@ -769,12 +775,19 @@ class PhalaCluster:
             node_name=node_name,
         )
         self.cvms[new_app_id] = cvm_info
-        self.head_id = new_app_id
-        logger.info("  📍 New head CVM: %s (%s)", cvm_name, new_app_id)
 
         # Push the new runner's compose hash to the registry so it can
         # verify re-encryption attestation for this runner.
-        self._approve_runner_hashes_on_registry()
+        # Must succeed before promoting to head — otherwise builds will
+        # be routed here but re-encryption will fail.
+        try:
+            self._approve_runner_hashes_on_registry()
+        except (requests.RequestException, SpawnteeClientError):
+            self._cleanup_failed_runner(new_app_id, cvm_name, "could not approve compose hash on registry")
+            return
+
+        self.head_id = new_app_id
+        logger.info("  📍 New head CVM: %s (%s)", cvm_name, new_app_id)
 
     def _cleanup_failed_runner(self, app_id: str, name: str, reason: str):
         """Clean up a runner CVM that failed to become ready."""
