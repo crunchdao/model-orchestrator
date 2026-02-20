@@ -483,21 +483,41 @@ class PhalaCluster:
                 return
 
             # 3. Orchestrator-side threshold (computed from live memory)
+            needs_new_head = False
             if head_count >= provision_threshold:
                 logger.info(
-                    "📊 Head CVM %s has %d/%d models (live threshold=%d), provisioning new runner...",
+                    "📊 Head CVM %s has %d/%d models (live threshold=%d), looking for CVM with capacity...",
                     head.name, head_count, max_models_per_cvm, provision_threshold,
                 )
-                self._provision_new_runner()
-                return
+                needs_new_head = True
 
             # 4. CVM-side safety net (disk/memory based CAPACITY_THRESHOLD).
-            if not accepting:
+            if not needs_new_head and not accepting:
                 logger.info(
                     "📊 Head CVM %s reports accepting_new_models=false "
-                    "(CAPACITY_THRESHOLD safety net), provisioning new runner...",
+                    "(CAPACITY_THRESHOLD safety net), looking for CVM with capacity...",
                     head.name,
                 )
+                needs_new_head = True
+
+            if needs_new_head:
+                # Before provisioning, check if any other existing CVM has capacity
+                for cvm in reversed(list(self.cvms.values())):
+                    if cvm.app_id == head_id_snapshot:
+                        continue  # skip the full head
+                    try:
+                        if cvm.client.has_capacity():
+                            self.head_id = cvm.app_id
+                            logger.info(
+                                "📍 Switched head to existing CVM with capacity: %s (%s)",
+                                cvm.name, cvm.app_id,
+                            )
+                            return
+                    except SpawnteeClientError as e:
+                        logger.debug("  ⏳ CVM %s unreachable for capacity check: %s", cvm.name, e)
+                        continue
+
+                logger.info("  No existing CVM has capacity, provisioning new runner...")
                 self._provision_new_runner()
                 return
 

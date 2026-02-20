@@ -538,6 +538,101 @@ class TestEnsureCapacity:
         assert cluster.total_running_models() == 3
         assert cluster.head_model_count() == 1
 
+    def test_switches_head_to_existing_cvm_with_capacity(self):
+        """When head is full but another CVM has capacity, switch head instead of provisioning."""
+        cluster = PhalaCluster(
+            cluster_name="test",
+            instance_type="tdx.medium",
+            memory_per_model_mb=1024,
+            provision_factor=0.8,
+        )
+        # Head CVM (registry) is full
+        client_reg = MagicMock(spec=SpawnteeClient)
+        client_reg.capacity.return_value = {
+            "total_memory_mb": 4096,
+            "available_memory_mb": 500,
+            "accepting_new_models": False,
+        }
+        # Runner CVM has capacity
+        client_runner = MagicMock(spec=SpawnteeClient)
+        client_runner.has_capacity.return_value = True
+
+        cluster.cvms = {
+            "reg1": CVMInfo("reg1", "test-registry", client_reg, mode="registry+runner"),
+            "runner1": CVMInfo("runner1", "test-runner-001", client_runner, mode="runner"),
+        }
+        cluster.head_id = "reg1"
+        cluster.task_client_map = {"t1": "reg1", "t2": "reg1"}
+
+        cluster.ensure_capacity()
+
+        # Should switch head to runner, NOT try to provision
+        assert cluster.head_id == "runner1"
+
+    def test_provisions_when_no_existing_cvm_has_capacity(self):
+        """When head is full and no other CVM has capacity, provision a new one."""
+        cluster = PhalaCluster(
+            cluster_name="test",
+            instance_type="tdx.medium",
+            memory_per_model_mb=1024,
+            provision_factor=0.8,
+        )
+        cluster.phala_api_key = ""  # Will fail at provisioning, that's fine
+        # Head CVM full
+        client_reg = MagicMock(spec=SpawnteeClient)
+        client_reg.capacity.return_value = {
+            "total_memory_mb": 4096,
+            "available_memory_mb": 500,
+            "accepting_new_models": False,
+        }
+        # Runner also full
+        client_runner = MagicMock(spec=SpawnteeClient)
+        client_runner.has_capacity.return_value = False
+
+        cluster.cvms = {
+            "reg1": CVMInfo("reg1", "test-registry", client_reg, mode="registry+runner"),
+            "runner1": CVMInfo("runner1", "test-runner-001", client_runner, mode="runner"),
+        }
+        cluster.head_id = "reg1"
+        cluster.task_client_map = {"t1": "reg1", "t2": "reg1"}
+
+        with pytest.raises(PhalaClusterError, match="PHALA_API_KEY"):
+            cluster.ensure_capacity()
+
+        # Head should NOT have changed
+        assert cluster.head_id == "reg1"
+
+    def test_switches_head_when_threshold_exceeded(self):
+        """When head exceeds model threshold, switch to existing CVM with capacity."""
+        cluster = PhalaCluster(
+            cluster_name="test",
+            instance_type="tdx.medium",
+            memory_per_model_mb=1024,
+            provision_factor=0.8,
+        )
+        # Head has capacity per CVM but is over model threshold
+        client_head = MagicMock(spec=SpawnteeClient)
+        client_head.capacity.return_value = {
+            "total_memory_mb": 4096,
+            "available_memory_mb": 1000,
+            "accepting_new_models": True,
+        }
+        # Another runner has capacity
+        client_runner = MagicMock(spec=SpawnteeClient)
+        client_runner.has_capacity.return_value = True
+
+        cluster.cvms = {
+            "cvm1": CVMInfo("cvm1", "test-registry", client_head, mode="registry+runner"),
+            "cvm2": CVMInfo("cvm2", "test-runner-001", client_runner, mode="runner"),
+        }
+        cluster.head_id = "cvm1"
+        # 3 tasks → max=3, threshold=2 → 3 >= 2 triggers
+        cluster.task_client_map = {"t1": "cvm1", "t2": "cvm1", "t3": "cvm1"}
+
+        cluster.ensure_capacity()
+
+        assert cluster.head_id == "cvm2"
+
     def test_all_clients_returns_all(self):
         cluster = PhalaCluster(cluster_name="")
         client1 = MagicMock(spec=SpawnteeClient)
