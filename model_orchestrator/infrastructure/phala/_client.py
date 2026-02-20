@@ -323,6 +323,25 @@ class SpawnteeClient:
         """
         return self.capacity().get("accepting_new_models", False)
 
+    def approve_hashes(self, hashes: list[str]) -> dict:
+        """
+        POST /registry/approve-hash — push approved compose hashes to the registry.
+
+        Called by the orchestrator after provisioning a runner CVM to tell the
+        registry which compose hashes to accept for re-encryption attestation.
+
+        Args:
+            hashes: List of SHA-256 hex compose hashes to approve.
+
+        Returns:
+            Response dict with approved_count and hashes.
+        """
+        return self._request(
+            "POST", "/registry/approve-hash",
+            json={"hashes": hashes},
+            max_retries=DEFAULT_MAX_RETRIES,
+        ).json()
+
     def get_builder_logs(
         self, task_id: str, follow: bool = False, tail: int = 0, from_start: bool = True,
         stream: bool = False,

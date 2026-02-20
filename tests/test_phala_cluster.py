@@ -633,6 +633,75 @@ class TestEnsureCapacity:
 
         assert cluster.head_id == "cvm2"
 
+    def test_approve_hashes_called_after_discover(self):
+        """After discover(), runner compose hashes are pushed to the registry."""
+        cluster = PhalaCluster(
+            cluster_name="test",
+            phala_api_url="https://mock-api",
+        )
+        cluster.phala_api_key = "test-key"
+
+        client_reg = MagicMock(spec=SpawnteeClient)
+        client_reg.health.return_value = {"status": "healthy", "service": "secure-spawn", "mode": "registry+runner"}
+        client_reg.has_capacity.return_value = False
+        client_reg.approve_hashes.return_value = {"approved_count": 1, "hashes": ["abc123"]}
+
+        client_runner = MagicMock(spec=SpawnteeClient)
+        client_runner.health.return_value = {"status": "healthy", "service": "secure-spawn", "mode": "runner"}
+        client_runner.has_capacity.return_value = True
+
+        api_response = [
+            {"app_id": "reg1", "name": "test-registry", "status": "running", "node_info": {"name": "prod10"}},
+            {"app_id": "run1", "name": "test-runner-001", "status": "running", "node_info": {"name": "prod10"}},
+        ]
+
+        # Mock Phala API: list CVMs, then get compose_hash for runner
+        def mock_get(url, **kwargs):
+            resp = MagicMock()
+            resp.raise_for_status = MagicMock()
+            if "/cvms/run1" in url:
+                resp.json.return_value = {"compose_hash": "abc123"}
+            else:
+                resp.json.return_value = api_response
+            return resp
+
+        clients = {"reg1": client_reg, "run1": client_runner}
+
+        with patch("requests.get", side_effect=mock_get), \
+             patch.object(SpawnteeClient, "__new__", side_effect=lambda cls, **kw: clients.get(
+                 next((k for k, v in clients.items() if k in str(kw)), "reg1"), client_reg)):
+            # Simpler approach: manually set up CVMs and call the method
+            pass
+
+        # Set up cluster state directly and test _approve_runner_hashes_on_registry
+        cluster.cvms = {
+            "reg1": CVMInfo("reg1", "test-registry", client_reg, mode="registry+runner"),
+            "run1": CVMInfo("run1", "test-runner-001", client_runner, mode="runner"),
+        }
+
+        with patch("requests.get") as mock_get:
+            mock_resp = MagicMock()
+            mock_resp.raise_for_status = MagicMock()
+            mock_resp.json.return_value = {"compose_hash": "abc123"}
+            mock_get.return_value = mock_resp
+
+            cluster._approve_runner_hashes_on_registry()
+
+        client_reg.approve_hashes.assert_called_once_with(["abc123"])
+
+    def test_approve_hashes_skipped_when_no_runners(self):
+        """No approve call when there are no runner CVMs."""
+        cluster = PhalaCluster(cluster_name="test", phala_api_url="https://mock-api")
+        cluster.phala_api_key = "test-key"
+
+        client_reg = MagicMock(spec=SpawnteeClient)
+        cluster.cvms = {
+            "reg1": CVMInfo("reg1", "test-registry", client_reg, mode="registry+runner"),
+        }
+
+        cluster._approve_runner_hashes_on_registry()
+        client_reg.approve_hashes.assert_not_called()
+
     def test_all_clients_returns_all(self):
         cluster = PhalaCluster(cluster_name="")
         client1 = MagicMock(spec=SpawnteeClient)

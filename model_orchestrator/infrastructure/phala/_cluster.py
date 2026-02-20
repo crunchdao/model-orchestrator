@@ -232,6 +232,11 @@ class PhalaCluster:
 
         logger.info("✅ Discovered %d CVM(s), head=%s", len(self.cvms), self.head_id)
 
+        # Push runner compose hashes to the registry so it can verify
+        # re-encryption attestation. This is idempotent and ensures the
+        # registry has the correct hashes even after a restart.
+        self._approve_runner_hashes_on_registry()
+
     def _discover_from_api(self):
         """Query Phala Cloud API for CVMs matching our cluster name prefix."""
         logger.info("🔍 Discovering CVMs from Phala API (prefix=%s)...", self.cluster_name)
@@ -288,6 +293,22 @@ class PhalaCluster:
             self.cvms[app_id] = cvm_info
             logger.info("  ✅ %s (%s) mode=%s", name, app_id, mode)
 
+    def _get_compose_hash(self, app_id: str) -> str:
+        """Look up a CVM's compose_hash from the Phala API."""
+        try:
+            headers = {"X-API-Key": self.phala_api_key}
+            response = requests.get(
+                f"{self.phala_api_url}/api/v1/cvms/{app_id}",
+                headers=headers,
+                timeout=15,
+            )
+            response.raise_for_status()
+            cvm = response.json()
+            return cvm.get("compose_hash", "")
+        except Exception as e:
+            logger.warning("  Could not look up compose_hash for %s: %s", app_id, e)
+        return ""
+
     def _get_node_name(self, app_id: str) -> str:
         """Look up a CVM's node name from the Phala API."""
         try:
@@ -316,6 +337,52 @@ class PhalaCluster:
             logger.warning("  ⚠️ %s is not a spawntee service, skipping", label)
             return None
         return health.get("mode", "unknown")
+
+    def _approve_runner_hashes_on_registry(self):
+        """
+        Collect compose hashes from all runner CVMs and push them to the registry.
+
+        Called after discover() and after provisioning a new runner. This ensures
+        the registry always knows which runner compose hashes to accept for
+        re-encryption attestation — even after a registry restart.
+        """
+        registry = next((c for c in self.cvms.values() if "registry" in c.mode), None)
+        if not registry:
+            logger.debug("No registry CVM found, skipping hash approval")
+            return
+
+        runner_ids = [
+            app_id for app_id, cvm in self.cvms.items()
+            if cvm.mode == "runner"
+        ]
+        if not runner_ids:
+            logger.debug("No runner CVMs found, skipping hash approval")
+            return
+
+        # Collect compose hashes from Phala API
+        hashes = []
+        for app_id in runner_ids:
+            h = self._get_compose_hash(app_id)
+            if h:
+                hashes.append(h)
+                logger.debug("  Runner %s compose_hash: %s", app_id, h[:16] + "...")
+
+        if not hashes:
+            logger.warning("⚠️ Could not read any runner compose hashes from Phala API")
+            return
+
+        # Deduplicate (all runners with same image + env vars get the same hash)
+        unique_hashes = list(set(hashes))
+
+        try:
+            result = registry.client.approve_hashes(unique_hashes)
+            logger.info(
+                "🔐 Approved %d compose hash(es) on registry %s",
+                result.get("approved_count", len(unique_hashes)),
+                registry.name,
+            )
+        except Exception as e:
+            logger.error("❌ Failed to approve hashes on registry: %s", e)
 
     # ─── Task routing ───
 
@@ -704,6 +771,10 @@ class PhalaCluster:
         self.cvms[new_app_id] = cvm_info
         self.head_id = new_app_id
         logger.info("  📍 New head CVM: %s (%s)", cvm_name, new_app_id)
+
+        # Push the new runner's compose hash to the registry so it can
+        # verify re-encryption attestation for this runner.
+        self._approve_runner_hashes_on_registry()
 
     def _cleanup_failed_runner(self, app_id: str, name: str, reason: str):
         """Clean up a runner CVM that failed to become ready."""
