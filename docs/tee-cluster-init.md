@@ -1,171 +1,168 @@
-# TEE Cluster Initialization
+# TEE Cluster Initialization (current)
 
 ## Overview
 
-A TEE cluster consists of Phala CVMs (Confidential Virtual Machines) running
-the spawntee service. The cluster has two CVM roles:
+The Phala TEE setup now works as a **registry-first cluster**:
 
-- **Registry** (`registry+runner` mode) — holds encryption keys, runs models,
-  and validates runners via TDX attestation + compose hash verification. Needs
-  AWS credentials for S3 access to encrypted models. This is the only CVM
-  after initialization.
+- Start with **one registry CVM** (`registry+runner` mode).
+- The orchestrator discovers CVMs by `cluster-name` prefix.
+- When capacity is exhausted, the orchestrator auto-provisions runner CVMs (`runner` mode).
+- Runner attestation hashes are approved dynamically by the orchestrator via:
+  - `POST /registry/approve-hash`
 
-- **Runner** (`runner` mode) — additional CVMs auto-provisioned by the
-  orchestrator when the registry reaches capacity. Pulls model data from the
-  registry via `/registry/re-encrypt`. No AWS credentials needed.
+> ✅ Important: the old manual `APPROVED_COMPOSE_HASH` bootstrap flow is no longer the primary path for current spawntee versions.
 
-## Initialization Flow
+---
 
-```
-1. Verify prerequisites
-2. Collect inputs
-3. Deploy registry CVM
-4. Wait for registry to become healthy
-5. Deploy a temporary runner CVM (to obtain the compose hash)
-6. Get the runner's compose_hash from the Phala API
-7. Delete the temporary runner CVM
-8. Update registry with APPROVED_COMPOSE_HASH
-9. Verify registry is healthy
-10. Generate orchestrator config YAML
-```
+## What changed vs the old doc
 
-**Why a temporary runner is needed:** The registry verifies runner identity via
-TDX attestation, which includes a `compose_hash`. This hash is computed by the
-Phala platform — it's *not* a simple local hash of the compose file. The only
-way to obtain it is to deploy a CVM with that compose file and read the hash
-back from the API. The temporary runner is deleted immediately after to avoid
-paying for an idle CVM. Until `APPROVED_COMPOSE_HASH` is set on the registry,
-it rejects all runner attestation requests (fail-closed).
+The previous version of this doc described a required temporary-runner flow:
+
+1. Deploy temp runner
+2. Read `compose_hash`
+3. Delete temp runner
+4. Re-deploy registry with `APPROVED_COMPOSE_HASH`
+
+That flow is now legacy. Current orchestrator code pushes runner hashes to the registry automatically after discovery/provisioning.
+
+---
 
 ## Prerequisites
 
-| Requirement | Check command |
-|---|---|
-| Phala CLI installed | `phala --version` |
-| Phala CLI logged in | `phala status` |
-| `PHALA_API_KEY` set | `echo $PHALA_API_KEY` |
-| AWS credentials available | For registry CVM's S3 access |
-| Compose files present | `model_orchestrator/data/docker-compose.phala.{registry,runner}.yml` |
+### Required repos/layout
 
-## Required Inputs
+This repo expects `cruncher_phala` as a sibling when using the setup script:
 
-| Input | Description | Example |
-|---|---|---|
-| **Cluster name** | Name prefix for all CVMs. Used for API discovery. | `bird-tracker` |
-| **AWS_ACCESS_KEY_ID** | S3 access for encrypted model storage (registry only) | `AKIA...` |
-| **AWS_SECRET_ACCESS_KEY** | S3 secret key (registry only) | `wJal...` |
+```text
+some-parent/
+  ├── model-orchestrator-new/
+  └── cruncher_phala/
+```
 
-## Inputs with Defaults
+### Required tools
 
-| Input | Default | Description |
-|---|---|---|
-| Instance type | `tdx.medium` | CVM size: `tdx.small` (2GB), `tdx.medium` (4GB), `tdx.large` (8GB), `tdx.xlarge` (16GB) |
-| AWS_REGION | `eu-west-1` | S3 region |
-| Spawntee port | `9010` | Port where spawntee API is exposed |
-| Memory per model | `1024` MB | Estimated RAM per model container |
-| Provision factor | `0.8` | Provision new runner at this % of capacity |
-| Max models | `0` (unlimited) | Global cap across the cluster |
-| CAPACITY_THRESHOLD | `0.8` | CVM reports full at this usage ratio |
-| CVM_BASE_DOMAIN | `dstack-pha-prod10.phala.network` | Phala gateway domain |
-| Registry compose | `model_orchestrator/data/docker-compose.phala.registry.yml` | |
-| Runner compose | `model_orchestrator/data/docker-compose.phala.runner.yml` | |
+- `phala` CLI
+- `python3`
+- `curl`
+- `openssl`
 
-## Outputs
+### Required credentials / env
 
-After successful initialization:
+- `PHALA_API_KEY`
+- `AWS_ACCESS_KEY_ID` (registry CVM)
+- `AWS_SECRET_ACCESS_KEY` (registry CVM)
+- `AWS_REGION` (default: `eu-west-1`)
+- Coordinator RSA key directory (`key.pem` or `tls.key`) for gateway auth signing
+- `GATEWAY_AUTH_COORDINATOR_WALLET` (wallet used by spawntee gateway auth middleware)
 
-1. **Registry CVM** — deployed, healthy, `APPROVED_COMPOSE_HASH` set, ready to run models and accept future runners
-2. **Orchestrator config YAML** — ready to run with the registry as the sole CVM
+---
 
-## Step-by-Step Detail
+## Recommended setup path
 
-### Step 1: Deploy Registry CVM
+Use:
+
+```bash
+scripts/setup_phala_cluster.sh
+```
+
+The script currently:
+
+1. Validates environment and required code changes
+2. Collects credentials and cluster settings
+3. Writes secret/env files
+4. Optionally builds/pushes spawntee image
+5. Deploys (or reuses) registry CVM
+6. Performs compose-hash attestation setup
+7. Writes orchestrator `.env`
+8. Verifies health and auth behavior
+
+> Note: the script still contains a compatibility step that can set `APPROVED_COMPOSE_HASH`. This is safe, but for current spawntee/orchestrator behavior hash approval is also handled dynamically at runtime.
+
+---
+
+## Minimal manual bootstrap (current runtime model)
+
+If you do this manually, the minimum needed state is:
+
+1. Deploy a registry CVM
+2. Configure orchestrator with Phala runner + gateway certs
+3. Start orchestrator
+
+### 1) Deploy registry CVM
+
+Use the compose from `cruncher_phala` (current path used by setup script):
 
 ```bash
 phala deploy \
-  --name {cluster_name}-registry \
-  --instance-type {instance_type} \
-  --compose {registry_compose_path} \
-  -e AWS_ACCESS_KEY_ID={aws_key} \
-  -e AWS_SECRET_ACCESS_KEY={aws_secret} \
-  -e AWS_REGION={aws_region} \
+  --name "${CLUSTER_NAME}-registry" \
+  --instance-type "${INSTANCE_TYPE:-tdx.medium}" \
+  --compose "../cruncher_phala/spawntee/docker-compose.phala.debug.yml" \
+  -e "AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID" \
+  -e "AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY" \
+  -e "AWS_REGION=${AWS_REGION:-eu-west-1}" \
+  -e "GATEWAY_AUTH_COORDINATOR_WALLET=$GATEWAY_AUTH_COORDINATOR_WALLET" \
+  --api-key "$PHALA_API_KEY" \
   --json --wait
 ```
 
-The registry starts in `registry+runner` mode (from compose `MODE=${MODE:-registry+runner}`).
-`APPROVED_COMPOSE_HASH` is empty at this point — runners cannot attest yet.
+### 2) Configure orchestrator
 
-### Step 2: Verify Registry Health
-
-```bash
-curl https://{registry_app_id}-{spawntee_port}.dstack-pha-{node_name}.phala.network/health
-# → {"status": "healthy", "mode": "registry+runner", ...}
-```
-
-### Step 3: Deploy Temporary Runner CVM
-
-Deploy a throwaway runner solely to obtain the compose hash from the platform.
+Set env vars (for runtime + autoscaling):
 
 ```bash
-phala deploy \
-  --name {cluster_name}-runner-temp \
-  --instance-type {instance_type} \
-  --compose {runner_compose_path} \
-  -e REGISTRY_URL=https://{registry_app_id}-{spawntee_port}.dstack-pha-{node_name}.phala.network \
-  --json --wait
+export PHALA_API_KEY=...
+export GATEWAY_CERT_DIR=/path/to/coordinator/certs
+export GATEWAY_AUTH_COORDINATOR_WALLET=...
 ```
 
-### Step 4: Get Runner Compose Hash
+Use Phala runner config (kebab-case in YAML):
+
+```yaml
+infrastructure:
+  runner:
+    type: phala
+    cluster-name: "crunch-tee"
+    phala-api-url: "https://cloud-api.phala.network"
+    runner-compose-path: "../cruncher_phala/spawntee/docker-compose.phala.runner.yml"
+    spawntee-port: 9010
+    request-timeout: 60
+    instance-type: "tdx.medium"
+    max-models: 0
+    gateway-cert-dir: "/path/to/coordinator/certs"
+```
+
+### 3) Start orchestrator
 
 ```bash
-curl -H "X-API-Key: $PHALA_API_KEY" \
-  https://cloud-api.phala.network/api/v1/cvms/{runner_app_id} \
-  | jq '.compose_hash'
+poetry run model-orchestrator
 ```
 
-### Step 5: Delete Temporary Runner
+---
 
-```bash
-phala cvms delete {runner_app_id}
-```
+## Runtime behavior (current)
 
-### Step 6: Update Registry with APPROVED_COMPOSE_HASH
+At startup, `PhalaCluster`:
 
-Re-deploy the registry with the runner's compose hash so it accepts future runner attestations:
+1. Discovers CVMs by `cluster-name` prefix from Phala API
+2. Probes each CVM for mode/health
+3. Picks head CVM based on `/capacity`
+4. Rebuilds task routing map from `/running_models`
+5. Pushes discovered runner compose hashes to registry via `/registry/approve-hash`
 
-```bash
-phala deploy \
-  --uuid {registry_uuid} \
-  --compose {registry_compose_path} \
-  -e AWS_ACCESS_KEY_ID={aws_key} \
-  -e AWS_SECRET_ACCESS_KEY={aws_secret} \
-  -e AWS_REGION={aws_region} \
-  -e APPROVED_COMPOSE_HASH={runner_compose_hash} \
-  --json --wait
-```
+During operation:
 
-### Step 7: Verify Registry Health
+- Before each build, orchestrator asks head CVM `/capacity`
+- If full, it provisions a new runner with `phala deploy`
+- Waits for runner readiness (`/` then `/capacity`)
+- Approves runner hash on registry
+- Promotes new runner as head
 
-```bash
-curl https://{registry}-{spawntee_port}.../health
-# → {"status": "healthy", "mode": "registry+runner"}
-```
+---
 
-### Step 8: Generate Orchestrator Config
+## Notes / caveats
 
-Produce an `orchestrator.yml` with:
-- `cluster-name`, `phala-api-url`, compose paths
-- `cluster-urls` fallback (registry URL)
-- Instance type, memory, provision settings
-- Watcher config and crunch definitions
-
-## Important Notes
-
-- **Compose hash changes with every compose file change** (including image version bumps).
-  After updating compose files, deploy a temporary runner, grab the new hash, delete it,
-  and update `APPROVED_COMPOSE_HASH` on the registry.
-- **Multiple hashes** can be approved for rolling upgrades: `hash_old,hash_new`.
-- After init, the orchestrator auto-provisions dedicated runners via
-  `_provision_new_runner()` as the registry reaches capacity.
-- `allowed_envs` in the Phala API ensures env var values don't affect the compose hash,
-  so runners with different `REGISTRY_URL` values share the same hash.
+- `runner-compose-path` is required for autoscaling.
+- `phala` CLI must be available on the orchestrator host for provisioning.
+- `PHALA_API_KEY` is read from environment (not YAML field).
+- `memory-per-model-mb` and `provision-factor` are still accepted in config for backward compatibility but currently ignored by `PhalaCluster` capacity decisions.
+- If you run older spawntee that does not support `/registry/approve-hash`, you may need the legacy `APPROVED_COMPOSE_HASH` flow.

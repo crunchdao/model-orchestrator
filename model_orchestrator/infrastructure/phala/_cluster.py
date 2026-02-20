@@ -99,9 +99,9 @@ class PhalaCluster:
         runner_compose_path: str = "",
         instance_type: str = "tdx.medium",
         max_models: int = 0,
+        memory_per_model_mb: int = 256,
         gateway_cert_dir: str | None = None,
         # Deprecated — kept for config compat, ignored at runtime
-        memory_per_model_mb: int = 0,
         provision_factor: float = 0.0,
     ):
         """
@@ -115,6 +115,9 @@ class PhalaCluster:
             runner_compose_path: Path to docker-compose.phala.runner.yml for provisioning runners.
             instance_type: Phala CVM instance type for new runners (e.g. "tdx.medium").
             max_models: Global cap on total models across the cluster. 0 = unlimited.
+            memory_per_model_mb: Memory budget per model in MB. Passed to runner CVMs
+                as MODEL_MEMORY_LIMIT_MB env var at deploy time. The CVM uses it for
+                capacity planning (max_models) and container enforcement (ulimit).
         """
         self.cluster_name = cluster_name
         self.spawntee_port = spawntee_port
@@ -151,6 +154,7 @@ class PhalaCluster:
         # Instance type is only used when provisioning new runner CVMs.
         self.instance_type = instance_type
         self.max_models = max_models  # 0 = unlimited
+        self.memory_per_model_mb = memory_per_model_mb
 
         if instance_type not in INSTANCE_TYPE_MEMORY_MB:
             raise PhalaClusterError(
@@ -159,9 +163,10 @@ class PhalaCluster:
             )
 
         logger.info(
-            "📐 Capacity: instance=%s, global_max=%s "
-            "(CVM decides accepting_new_models via CAPACITY_THRESHOLD)",
+            "📐 Capacity: instance=%s, model_memory=%dMB, global_max=%s "
+            "(CVM decides accepting_new_models via CAPACITY_THRESHOLD + MODEL_MEMORY_LIMIT_MB)",
             instance_type,
+            memory_per_model_mb,
             max_models or "unlimited",
         )
 
@@ -580,6 +585,7 @@ class PhalaCluster:
             "--compose", self.runner_compose_path,
             "-e", f"REGISTRY_URL={registry_url}",
             "-e", f"CAPACITY_THRESHOLD={os.environ.get('CAPACITY_THRESHOLD', '0.8')}",
+            "-e", f"MODEL_MEMORY_LIMIT_MB={self.memory_per_model_mb}",
         ]
         if coordinator_wallet:
             cmd.extend(["-e", f"GATEWAY_AUTH_COORDINATOR_WALLET={coordinator_wallet}"])

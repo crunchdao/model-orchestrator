@@ -309,7 +309,7 @@ class SpawnteeClient:
         GET /capacity — get CVM resource capacity.
 
         Returns dict with total_memory_mb, available_memory_mb, running_models,
-        accepting_new_models, capacity_threshold, etc.
+        accepting_new_models, capacity_threshold, max_models, etc.
         """
         return self._request("GET", "/capacity", max_retries=DEFAULT_MAX_RETRIES).json()
 
@@ -322,6 +322,8 @@ class SpawnteeClient:
         the caller must not make capacity decisions without a real answer.
         """
         return self.capacity().get("accepting_new_models", False)
+
+
 
     def approve_hashes(self, hashes: list[str]) -> dict:
         """
