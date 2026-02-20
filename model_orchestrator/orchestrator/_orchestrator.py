@@ -82,12 +82,8 @@ class Orchestrator:
             elif runner_config.type == "phala":
                 logger.info("Configuring Phala TEE builder and runner...")
 
-                from ..infrastructure.phala import PhalaModelBuilder, PhalaModelRunner, PhalaMetrics
+                from ..infrastructure.phala import PhalaModelBuilder, PhalaModelRunner
                 from ..infrastructure.phala._cluster import PhalaCluster
-
-                db_dir = str(Path(configuration.infrastructure.database.path).parent)
-                phala_metrics = PhalaMetrics(db_path=f"{db_dir}/phala_metrics.db")
-                self.phala_metrics = phala_metrics
 
                 # Initialize cluster: discovers CVMs from Phala API
                 cluster = PhalaCluster(
@@ -106,8 +102,8 @@ class Orchestrator:
                 cluster.rebuild_task_map()
                 self.phala_cluster = cluster
 
-                model_builder = PhalaModelBuilder(cluster, metrics=phala_metrics)
-                model_runner = PhalaModelRunner(cluster, metrics=phala_metrics)
+                model_builder = PhalaModelBuilder(cluster)
+                model_runner = PhalaModelRunner(cluster)
             else:
                 raise ValueError(f"Unknown runner type: {runner_config.type}")
 
@@ -425,9 +421,5 @@ class Orchestrator:
             logger.debug("Waiting for thread %s...", thread)
             thread.join()
         logger.debug("-- Processed threads")
-
-        # Print Phala metrics summary on shutdown
-        if hasattr(self, 'phala_metrics'):
-            logger.info(self.phala_metrics.summary())
 
 

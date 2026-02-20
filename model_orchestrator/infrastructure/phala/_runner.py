@@ -18,7 +18,6 @@ from ...entities.crunch import Crunch
 from ...services import Runner
 from ...utils.logging_utils import get_logger
 from ._client import SpawnteeAuthenticationError, SpawnteeClientError
-from ._metrics import PhalaMetrics
 
 if TYPE_CHECKING:
     from ._cluster import PhalaCluster
@@ -43,10 +42,9 @@ class PhalaModelRunner(Runner):
     externally-mapped ports.
     """
 
-    def __init__(self, cluster: PhalaCluster, metrics: PhalaMetrics | None = None):
+    def __init__(self, cluster: PhalaCluster):
         super().__init__()
         self._cluster = cluster
-        self._metrics = metrics
 
     def create(self, crunch: Crunch) -> dict:
         """No infrastructure to create — the CVM is already running."""
@@ -118,10 +116,6 @@ class PhalaModelRunner(Runner):
                 task = client.get_task(task_id)
                 spawntee_status = task.get("status", "failed")
                 status = _STATUS_MAP.get(spawntee_status, ModelRun.RunnerStatus.FAILED)
-
-                # Record metrics for completed/failed operations
-                if self._metrics and spawntee_status in ("completed", "failed"):
-                    self._metrics.record_from_task(task)
 
                 ip = ''
                 port = 0

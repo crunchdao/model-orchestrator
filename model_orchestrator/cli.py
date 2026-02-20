@@ -241,17 +241,5 @@ def import_(
     logger.info("Model state updated in the YAML file.")
 
 
-@cli.command("phala-metrics")
-@click.option("--db", "db_path", default="model_orchestrator/data/phala_metrics.db", help="Path to phala metrics database.", show_default=True)
-def phala_metrics(db_path: str):
-    """Show Phala TEE build/start timing metrics."""
-    from .infrastructure.phala import PhalaMetrics
-
-    init_logger(LoggingConfig(level="warning", file=None))
-
-    metrics = PhalaMetrics(db_path=db_path)
-    print(metrics.summary())
-
-
 if __name__ == "__main__":
     cli()

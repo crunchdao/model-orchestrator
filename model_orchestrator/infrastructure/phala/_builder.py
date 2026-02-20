@@ -20,7 +20,6 @@ from ...entities.crunch import Crunch
 from ...services import Builder
 from ...utils.logging_utils import get_logger
 from ._client import SpawnteeAuthenticationError, SpawnteeClientError
-from ._metrics import PhalaMetrics
 
 if TYPE_CHECKING:
     from ._cluster import PhalaCluster
@@ -48,10 +47,9 @@ class PhalaModelBuilder(Builder):
     The orchestrator submits the build and then polls for completion.
     """
 
-    def __init__(self, cluster: PhalaCluster, metrics: PhalaMetrics | None = None):
+    def __init__(self, cluster: PhalaCluster):
         super().__init__()
         self._cluster = cluster
-        self._metrics = metrics
 
     def create(self, crunch: Crunch) -> dict:
         """No infrastructure to create — the CVM is already running."""
@@ -185,9 +183,6 @@ class PhalaModelBuilder(Builder):
                 spawntee_status = task.get("status", "failed")
                 result[model] = _STATUS_MAP.get(spawntee_status, ModelRun.BuilderStatus.FAILED)
 
-                # Record metrics for completed/failed operations
-                if self._metrics and spawntee_status in ("completed", "failed"):
-                    self._metrics.record_from_task(task)
             except SpawnteeAuthenticationError:
                 raise  # critical — do not swallow
             except SpawnteeClientError as e:
