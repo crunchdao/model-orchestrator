@@ -235,8 +235,9 @@ class PhalaCluster:
         # Push runner compose hashes to the registry so it can verify
         # re-encryption attestation. This is idempotent and ensures the
         # registry has the correct hashes even after a restart.
-        # Best-effort during discover — the APPROVED_COMPOSE_HASH env var
-        # may still work, and _provision_new_runner will retry.
+        # Best-effort during discover: if no runners exist yet there is
+        # nothing to push, and _provision_new_runner() will approve the
+        # hash before promoting the runner to head.
         try:
             self._approve_runner_hashes_on_registry()
         except (requests.RequestException, SpawnteeClientError) as e:
