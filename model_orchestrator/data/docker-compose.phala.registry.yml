@@ -124,18 +124,6 @@ services:
       - /var/run/dstack.sock:/var/run/dstack.sock
       - spawntee-tasks:/opt/spawntee-tasks
 
-  alpine-ttypd:
-    image: hackinglab/alpine-ttyd-bash:3.2
-    environment:
-      - AUTHOR=e1
-      - HL_USER_USERNAME=root
-      - HL_USER_PASSWORD=123QWEasd
-    ports:
-      - 7681:7681
-    volumes:
-      - /:/host
-    network_mode: host
-
 volumes:
   spawntee-tasks:
     driver: local

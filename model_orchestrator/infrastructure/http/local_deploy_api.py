@@ -319,7 +319,10 @@ def _proxy_phala_logs(
 
     # For builder logs, job_id is base64-encoded task_id (same encoding
     # used in the URI construction in list_models)
-    task_id = base64.urlsafe_b64decode(job_id.encode("ascii")).decode("utf-8") if log_type == LogType.builder else job_id
+    try:
+        task_id = base64.urlsafe_b64decode(job_id.encode("ascii")).decode("utf-8") if log_type == LogType.builder else job_id
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid job id encoding")
 
     # Guard against path traversal via crafted base64 values
     if "/" in task_id or ".." in task_id:

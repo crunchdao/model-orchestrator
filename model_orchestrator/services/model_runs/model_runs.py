@@ -172,7 +172,10 @@ class ModelRunsService:
             if already_running:
                 get_logger().info("Model %s already running in CVM — adopting (task=%s, port=%s)",
                                  model.model_id, already_running.get("task_id"), already_running.get("external_port"))
-                task_id = already_running["task_id"]
+                task_id = already_running.get("task_id")
+                if not task_id:
+                    get_logger().warning("Model %s running but has no task_id — re-running", model.model_id)
+                    return self.run_service.run_model(model, crunch)
                 model.update_builder_status(task_id, ModelRun.BuilderStatus.SUCCESS)
                 model.update_runner_status(task_id, ModelRun.RunnerStatus.INITIALIZING)
                 model.set_runner_info({"spawntee_task_id": task_id})

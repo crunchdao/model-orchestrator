@@ -1,7 +1,7 @@
 services:
   model-orchestrator:
     build:
-      context: /home/ubuntu/code/model-orchestrator
+      context: .
       dockerfile: Dockerfile
     container_name: model-orchestrator
     restart: unless-stopped

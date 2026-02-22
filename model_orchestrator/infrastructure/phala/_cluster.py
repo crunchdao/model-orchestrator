@@ -446,13 +446,15 @@ class PhalaCluster:
 
     def total_running_models(self) -> int:
         """Count models across all CVMs based on the task routing map."""
-        return len(self.task_client_map)
+        with self._lock:
+            return len(self.task_client_map)
 
     def head_model_count(self) -> int:
         """Count how many models are assigned to the current head CVM."""
-        if not self.head_id:
-            return 0
-        return sum(1 for app_id in self.task_client_map.values() if app_id == self.head_id)
+        with self._lock:
+            if not self.head_id:
+                return 0
+            return sum(1 for app_id in self.task_client_map.values() if app_id == self.head_id)
 
     def ensure_capacity(self):
         """
@@ -490,11 +492,9 @@ class PhalaCluster:
         # ── Phase 2: ask the CVM (network call, no lock) ────────────
         accepting = head.client.has_capacity()
 
-        # ── Phase 3: decide and optionally provision (under lock) ────
+        # ── Phase 3: decide and optionally provision ────────────────
+        # First, check under the lock whether another thread already handled it.
         with self._lock:
-            # Re-check that the head hasn't changed while we were waiting
-            # on the network call. If it has, another thread already
-            # handled provisioning — nothing to do.
             if self.head_id != head_id_snapshot:
                 logger.debug(
                     "↩️ Head changed (%s → %s) while querying capacity, skipping",
@@ -502,37 +502,57 @@ class PhalaCluster:
                 )
                 return
 
-            if not accepting:
-                logger.info(
-                    "📊 Head CVM %s reports accepting_new_models=false, "
-                    "looking for CVM with capacity...",
-                    head.name,
+            if accepting:
+                logger.debug(
+                    "✅ Head CVM %s has capacity (global=%d/%s)",
+                    head.name, total, self.max_models or "∞",
                 )
-
-                # Check if any other existing CVM has capacity
-                for cvm in reversed(list(self.cvms.values())):
-                    if cvm.app_id == head_id_snapshot:
-                        continue  # skip the full head
-                    try:
-                        if cvm.client.has_capacity():
-                            self.head_id = cvm.app_id
-                            logger.info(
-                                "📍 Switched head to existing CVM with capacity: %s (%s)",
-                                cvm.name, cvm.app_id,
-                            )
-                            return
-                    except SpawnteeClientError as e:
-                        logger.debug("  ⏳ CVM %s unreachable for capacity check: %s", cvm.name, e)
-                        continue
-
-                logger.info("  No existing CVM has capacity, provisioning new runner...")
-                self._provision_new_runner()
                 return
 
-            logger.debug(
-                "✅ Head CVM %s has capacity (global=%d/%s)",
-                head.name, total, self.max_models or "∞",
+            # Head is full — snapshot other CVMs to scan outside the lock
+            logger.info(
+                "📊 Head CVM %s reports accepting_new_models=false, "
+                "looking for CVM with capacity...",
+                head.name,
             )
+            candidates = [
+                cvm for cvm in reversed(list(self.cvms.values()))
+                if cvm.app_id != head_id_snapshot
+            ]
+
+        # ── Phase 3b: scan other CVMs for capacity (no lock — network calls) ──
+        new_head_id = None
+        for cvm in candidates:
+            try:
+                if cvm.client.has_capacity():
+                    new_head_id = cvm.app_id
+                    logger.info(
+                        "📍 Found existing CVM with capacity: %s (%s)",
+                        cvm.name, cvm.app_id,
+                    )
+                    break
+            except SpawnteeClientError as e:
+                logger.debug("  ⏳ CVM %s unreachable for capacity check: %s", cvm.name, e)
+                continue
+
+        # ── Phase 3c: apply result or provision (lock for state mutation only) ──
+        if new_head_id:
+            with self._lock:
+                # Another thread may have already changed the head; only
+                # update if it's still the same stale head we started with.
+                if self.head_id == head_id_snapshot:
+                    self.head_id = new_head_id
+                    logger.info(
+                        "📍 Switched head to existing CVM with capacity: %s",
+                        new_head_id,
+                    )
+            return
+
+        logger.info("  No existing CVM has capacity, provisioning new runner...")
+        # Provisioning is a long operation (subprocess + health checks).
+        # It mutates self.cvms and self.head_id at the very end, so we
+        # hold the lock only for the final state update inside _provision_new_runner.
+        self._provision_new_runner()
 
     def _provision_new_runner(self):
         """
@@ -701,7 +721,7 @@ class PhalaCluster:
         if not ready:
             return
 
-        # Add to cluster and make it the new head
+        # Add to cluster and make it the new head (under lock for state mutation)
         cvm_info = CVMInfo(
             app_id=new_app_id,
             name=cvm_name,
@@ -709,7 +729,9 @@ class PhalaCluster:
             mode="runner",
             node_name=node_name,
         )
-        self.cvms[new_app_id] = cvm_info
+
+        with self._lock:
+            self.cvms[new_app_id] = cvm_info
 
         # Push the new runner's compose hash to the registry so it can
         # verify re-encryption attestation for this runner.
@@ -721,7 +743,8 @@ class PhalaCluster:
             self._cleanup_failed_runner(new_app_id, cvm_name, "could not approve compose hash on registry")
             return
 
-        self.head_id = new_app_id
+        with self._lock:
+            self.head_id = new_app_id
         logger.info("  📍 New head CVM: %s (%s)", cvm_name, new_app_id)
 
     def _cleanup_failed_runner(self, app_id: str, name: str, reason: str):
@@ -734,17 +757,18 @@ class PhalaCluster:
         )
 
         # Remove from cluster state (it was never added, but be safe)
-        self.cvms.pop(app_id, None)
-        if self.head_id == app_id:
-            # Revert to the registry as head
-            registry = next((c for c in self.cvms.values() if "registry" in c.mode), None)
-            if registry:
-                self.head_id = registry.app_id
-                logger.info("  📍 Reverted head to registry: %s", registry.name)
-            elif self.cvms:
-                self.head_id = next(iter(self.cvms))
-            else:
-                self.head_id = None
+        with self._lock:
+            self.cvms.pop(app_id, None)
+            if self.head_id == app_id:
+                # Revert to the registry as head
+                registry = next((c for c in self.cvms.values() if "registry" in c.mode), None)
+                if registry:
+                    self.head_id = registry.app_id
+                    logger.info("  📍 Reverted head to registry: %s", registry.name)
+                elif self.cvms:
+                    self.head_id = next(iter(self.cvms))
+                else:
+                    self.head_id = None
 
         # Best-effort delete from Phala Cloud
         try:
