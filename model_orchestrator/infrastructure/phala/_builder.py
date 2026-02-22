@@ -8,7 +8,7 @@ inside the TEE, and builds a Docker image — all remotely.
 Uses PhalaCluster for CVM routing:
 - New builds go to the head CVM (with capacity check + auto-provisioning)
 - Status polls and image checks route to the correct CVM via task_id
-- is_built and check_already_running scan all CVMs
+- is_built scans all CVMs
 """
 
 from __future__ import annotations
@@ -128,37 +128,6 @@ class PhalaModelBuilder(Builder):
                 logger.warning("Could not check image on CVM %s for %s: %s", app_id, submission_id, e)
 
         return False, ""
-
-    def check_already_running(self, model: ModelRun) -> dict | None:
-        """
-        Check if a model's container is already running on any CVM.
-
-        Scans all CVMs and matches by submission_id. When a match
-        is found, records the task→CVM mapping and returns the model info.
-        """
-        submission_id = model.code_submission_id
-
-        for app_id, client in self._cluster.all_clients():
-            try:
-                running = client.get_running_models()
-                for rm in running:
-                    if rm.get("submission_id") == submission_id:
-                        task_id = rm.get("task_id")
-                        if task_id:
-                            self._cluster.register_task(task_id, app_id)
-
-                        logger.info(
-                            "Model %s (submission=%s) already running on CVM %s: task=%s port=%s",
-                            model.model_id, submission_id, app_id,
-                            rm.get("task_id"), rm.get("external_port"),
-                        )
-                        return rm
-            except SpawnteeAuthenticationError:
-                raise  # critical — do not swallow
-            except SpawnteeClientError as e:
-                logger.warning("Could not query running models on CVM %s: %s", app_id, e)
-
-        return None
 
     def load_status(self, model: ModelRun) -> ModelRun.BuilderStatus:
         """Poll the spawntee for a single model's build status."""
