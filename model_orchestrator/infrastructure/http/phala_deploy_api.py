@@ -2,7 +2,6 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 
 from fastapi import FastAPI, Request, Depends
-from fastapi.middleware.cors import CORSMiddleware
 
 from ...mediators.models_state_mediator import ModelsStateMediator
 
@@ -26,14 +25,6 @@ def create_phala_deploy_api(services: PhalaDeployServices) -> FastAPI:
     app = FastAPI(
         title="Phala model deployment API",
         lifespan=lifespan,
-    )
-
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
     )
 
     def get_services(request: Request) -> PhalaDeployServices:
