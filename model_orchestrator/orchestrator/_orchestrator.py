@@ -229,28 +229,31 @@ class Orchestrator:
             )
             self._backgrounds.append(schedule_poller.start_polling)
 
-        # ── HTTP API for model management (list models, stream logs, etc.) ──
-        # Started in both local and Phala modes. In local mode it also
-        # supports model upload/update via YAML config. In Phala mode
-        # log requests are proxied to the spawntee CVM that owns the task.
+        # ── HTTP API for model management ──
         if True:
             runner_type = configuration.infrastructure.runner.type
             if runner_type in ("local", "phala"):
-                from ..infrastructure.http import create_local_deploy_api, LocalDeployServices
                 import uvicorn
 
                 port = 8001
                 host = "0.0.0.0"
 
-                deploy_services = LocalDeployServices(
-                    model_state_mediator=self.model_state_mediator,
-                    app_config=configuration,
-                    model_state_config=self.model_config_poller if runner_type == "local" else None,
-                    phala_cluster=self.phala_cluster if runner_type == "phala" else None,
-                )
+                if runner_type == "local":
+                    from ..infrastructure.http import create_local_deploy_api, LocalDeployServices
+                    deploy_services = LocalDeployServices(
+                        model_state_mediator=self.model_state_mediator,
+                        app_config=configuration,
+                        model_state_config=self.model_config_poller,
+                    )
+                    deploy_api = create_local_deploy_api(deploy_services)
+                elif runner_type == "phala":
+                    from ..infrastructure.http import create_phala_deploy_api, PhalaDeployServices
+                    deploy_services = PhalaDeployServices(
+                        model_state_mediator=self.model_state_mediator,
+                    )
+                    deploy_api = create_phala_deploy_api(deploy_services)
 
                 logger.info(f"Start HTTP server for model management over {host}:{port} (mode={runner_type})")
-                deploy_api = create_local_deploy_api(deploy_services)
 
                 def make_uvicorn_runner(app, host, port):
                     config = uvicorn.Config(app, host=host, port=port, log_config=None, access_log=True)
