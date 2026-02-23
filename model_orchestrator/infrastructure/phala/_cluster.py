@@ -228,7 +228,7 @@ class PhalaCluster:
         # hash before promoting the runner to head.
         try:
             self._approve_runner_hashes_on_registry()
-        except (requests.RequestException, SpawnteeClientError) as e:
+        except (requests.RequestException, SpawnteeClientError, PhalaClusterError) as e:
             logger.warning("⚠️ Could not approve runner hashes during discover (will retry on provision): %s", e)
 
     def _discover_from_api(self):
@@ -288,20 +288,23 @@ class PhalaCluster:
             logger.info("  ✅ %s (%s) mode=%s", name, app_id, mode)
 
     def _get_compose_hash(self, app_id: str) -> str:
-        """Look up a CVM's compose_hash from the Phala API."""
-        try:
-            headers = {"X-API-Key": self.phala_api_key}
-            response = requests.get(
-                f"{self.phala_api_url}/api/v1/cvms/{app_id}",
-                headers=headers,
-                timeout=15,
+        """Look up a CVM's compose_hash from the Phala API.
+
+        Raises PhalaClusterError if the hash cannot be retrieved or is missing.
+        """
+        headers = {"X-API-Key": self.phala_api_key}
+        response = requests.get(
+            f"{self.phala_api_url}/api/v1/cvms/{app_id}",
+            headers=headers,
+            timeout=15,
+        )
+        response.raise_for_status()
+        cvm = response.json()
+        if "compose_hash" not in cvm:
+            raise PhalaClusterError(
+                f"CVM {app_id} has no compose_hash in Phala API response"
             )
-            response.raise_for_status()
-            cvm = response.json()
-            return cvm.get("compose_hash", "")
-        except Exception as e:
-            logger.warning("  Could not look up compose_hash for %s: %s", app_id, e)
-        return ""
+        return cvm["compose_hash"]
 
     def _get_node_name(self, app_id: str) -> str:
         """Look up a CVM's node name from the Phala API."""
@@ -353,17 +356,12 @@ class PhalaCluster:
             logger.debug("No runner CVMs found, skipping hash approval")
             return
 
-        # Collect compose hashes from Phala API
+        # Collect compose hashes from Phala API (raises on failure)
         hashes = []
         for app_id in runner_ids:
             h = self._get_compose_hash(app_id)
-            if h:
-                hashes.append(h)
-                logger.debug("  Runner %s compose_hash: %s", app_id, h[:16] + "...")
-
-        if not hashes:
-            logger.warning("⚠️ Could not read any runner compose hashes from Phala API")
-            return
+            hashes.append(h)
+            logger.debug("  Runner %s compose_hash: %s", app_id, h[:16] + "...")
 
         # Deduplicate (all runners with same image + env vars get the same hash)
         unique_hashes = list(set(hashes))
@@ -739,7 +737,7 @@ class PhalaCluster:
         # be routed here but re-encryption will fail.
         try:
             self._approve_runner_hashes_on_registry()
-        except (requests.RequestException, SpawnteeClientError):
+        except (requests.RequestException, SpawnteeClientError, PhalaClusterError):
             self._cleanup_failed_runner(new_app_id, cvm_name, "could not approve compose hash on registry")
             return
 
