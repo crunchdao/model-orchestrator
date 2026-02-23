@@ -165,7 +165,6 @@ class ModelRunsService:
             get_logger().debug("Build is not required")
             model.set_docker_image(docker_image)
             self.model_runs_repository.save_model(model)
-
             return self.run_service.run_model(model, crunch)
 
     def stop_model(self, model_id: str):
@@ -229,6 +228,10 @@ class ModelRunsService:
     def get_running_models_by_crunch_id(self, crunch_id: str):
         with self.lock:
             return self.cluster.get_running_models_by_crunch_id(crunch_id).copy()
+
+    def get_models_by_crunch_id(self, crunch_id: str):
+        with self.lock:
+            return self.cluster.get_models_by_crunch_id(crunch_id).copy()
 
     def is_model_in_crunch(self, model_id: str, crunch_id: str) -> bool:
         with self.lock:

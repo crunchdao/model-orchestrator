@@ -25,6 +25,6 @@ class SQLiteRepository:
     def _open(self) -> "closing[sqlite_utils.Database]":
         return closing(sqlite_utils.Database(self.db_path))
 
-    def _add_column_if_not_exists(self, db: sqlite_utils.Database, table_name, column_name: str, column_type: Optional[Any]):
+    def _add_column_if_not_exists(self, db: sqlite_utils.Database, table_name, column_name: str, column_type: Optional[Any], not_null_default=None):
         if column_name not in db[table_name].columns_dict:
-            db[table_name].add_column(column_name, column_type)
+            db[table_name].add_column(column_name, column_type, not_null_default=not_null_default)
