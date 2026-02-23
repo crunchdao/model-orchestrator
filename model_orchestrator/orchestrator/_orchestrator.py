@@ -96,7 +96,7 @@ class Orchestrator:
                     memory_per_model_mb=runner_config.memory_per_model_mb,
                     capacity_threshold=runner_config.capacity_threshold,
                     max_models=runner_config.max_models,
-                    gateway_cert_dir=runner_config.gateway_cert_dir,
+                    gateway_key_path=runner_config.gateway_key_path,
                 )
                 cluster.discover()
                 cluster.rebuild_task_map()

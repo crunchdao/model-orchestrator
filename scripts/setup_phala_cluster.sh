@@ -78,34 +78,21 @@ for cmd in phala python3 openssl curl; do
 done
 info "All required tools found (phala, python3, openssl, curl)"
 
-# Check coordinator certificates
-GATEWAY_CERT_DIR="${GATEWAY_CERT_DIR:-}"
-if [[ -z "$GATEWAY_CERT_DIR" ]]; then
-    GATEWAY_CERT_DIR=$(ask "Path to coordinator cert directory (containing key.pem or tls.key): ")
+# Check coordinator key file
+GATEWAY_KEY_PATH="${GATEWAY_KEY_PATH:-}"
+if [[ -z "$GATEWAY_KEY_PATH" ]]; then
+    GATEWAY_KEY_PATH=$(ask "Path to coordinator RSA private key file (PEM): ")
 fi
 
-if [[ ! -d "$GATEWAY_CERT_DIR" ]]; then
-    err "Coordinator cert directory not found: $GATEWAY_CERT_DIR"
+if [[ ! -f "$GATEWAY_KEY_PATH" ]]; then
+    err "Coordinator key file not found: $GATEWAY_KEY_PATH"
     echo ""
     echo "The coordinator RSA private key is required for gateway auth."
     echo "This is the same key used to sign gRPC calls to model containers."
     exit 1
 fi
 
-# Find the key file (key.pem or tls.key)
-CERT_KEY_FILE=""
-if [[ -f "$GATEWAY_CERT_DIR/key.pem" ]]; then
-    CERT_KEY_FILE="$GATEWAY_CERT_DIR/key.pem"
-elif [[ -f "$GATEWAY_CERT_DIR/tls.key" ]]; then
-    CERT_KEY_FILE="$GATEWAY_CERT_DIR/tls.key"
-fi
-
-if [[ -z "$CERT_KEY_FILE" ]]; then
-    err "No key.pem or tls.key found in $GATEWAY_CERT_DIR"
-    echo ""
-    echo "The coordinator RSA private key must be present as key.pem or tls.key."
-    exit 1
-fi
+CERT_KEY_FILE="$GATEWAY_KEY_PATH"
 
 # Validate the key is actually an RSA private key
 if ! openssl rsa -in "$CERT_KEY_FILE" -check -noout >/dev/null 2>&1; then
@@ -235,7 +222,7 @@ echo -e "${BOLD}Configuration summary:${NC}"
 echo "  AWS_REGION:          $AWS_REGION"
 echo "  CLUSTER_NAME:        $CLUSTER_NAME"
 echo "  INSTANCE_TYPE:       $INSTANCE_TYPE"
-echo "  GATEWAY_CERT_DIR:    $GATEWAY_CERT_DIR"
+echo "  GATEWAY_KEY_PATH:    $GATEWAY_KEY_PATH"
 echo "  COORDINATOR_WALLET:  $GATEWAY_AUTH_COORDINATOR_WALLET"
 echo ""
 
@@ -252,7 +239,7 @@ AWS_REGION=$AWS_REGION
 PHALA_API_KEY=$PHALA_API_KEY
 CLUSTER_NAME=$CLUSTER_NAME
 INSTANCE_TYPE=$INSTANCE_TYPE
-GATEWAY_CERT_DIR=$GATEWAY_CERT_DIR
+GATEWAY_KEY_PATH=$GATEWAY_KEY_PATH
 GATEWAY_AUTH_COORDINATOR_WALLET=$GATEWAY_AUTH_COORDINATOR_WALLET
 EOF
 chmod 600 "$SETUP_ENV"
@@ -462,7 +449,7 @@ cat > "$ORCH_ENV" <<EOF
 # Crunch TEE cluster configuration
 
 PHALA_API_KEY=$PHALA_API_KEY
-GATEWAY_CERT_DIR=$GATEWAY_CERT_DIR
+GATEWAY_KEY_PATH=$GATEWAY_KEY_PATH
 GATEWAY_AUTH_COORDINATOR_WALLET=$GATEWAY_AUTH_COORDINATOR_WALLET
 EOF
 info "Wrote orchestrator .env"
@@ -533,12 +520,12 @@ ${BOLD}Registry CVM:${NC}
   Mode:          registry+runner (serves keys, runs models)
 
 ${BOLD}Authentication:${NC}
-  GATEWAY_CERT_DIR:             $GATEWAY_CERT_DIR
+  GATEWAY_KEY_PATH:              $GATEWAY_KEY_PATH
   COORDINATOR_WALLET:           $GATEWAY_AUTH_COORDINATOR_WALLET
   Auth method:                  Coordinator RSA cert signature (same as gRPC)
   Stored in:
     - $PHALA_ROOT/spawntee/.env.secret  (CVM deploys — wallet address)
-    - $ORCH_ROOT/.env                   (orchestrator — cert dir + wallet)
+    - $ORCH_ROOT/.env                   (orchestrator — key path + wallet)
 
 ${BOLD}Orchestrator config:${NC}
   Set these in your orchestrator YAML config:

@@ -23,6 +23,7 @@ infrastructure:
     memory-per-model-mb: 1024        # 1 GB per model container
     capacity-threshold: 0.8          # CVM reports full at 80% capacity
     max-models: 20                   # global cap across the entire cluster
+    # gateway-key-path: "/path/to/coordinator/key.pem"
 
 watcher:
   interval: 10

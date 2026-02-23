@@ -38,7 +38,7 @@ some-parent/
 - `AWS_ACCESS_KEY_ID` (registry CVM)
 - `AWS_SECRET_ACCESS_KEY` (registry CVM)
 - `AWS_REGION` (default: `eu-west-1`)
-- Coordinator RSA key directory (`key.pem` or `tls.key`) for gateway auth signing
+- Coordinator RSA private key file (PEM) for gateway auth signing
 - `GATEWAY_AUTH_COORDINATOR_WALLET` (wallet used by spawntee gateway auth middleware)
 
 ---
@@ -86,7 +86,6 @@ Set env vars:
 
 ```bash
 export PHALA_API_KEY=...
-export GATEWAY_CERT_DIR=/path/to/coordinator/certs
 export GATEWAY_AUTH_COORDINATOR_WALLET=...
 ```
 
@@ -105,7 +104,7 @@ infrastructure:
     max-models: 0
     memory-per-model-mb: 1024
     capacity-threshold: 0.8
-    gateway-cert-dir: "/path/to/coordinator/certs"
+    gateway-key-path: "/path/to/coordinator/key.pem"
 ```
 
 ### 3) Start orchestrator
@@ -152,12 +151,11 @@ During operation:
 | `max-models` | `0` | Global cap on total models (0 = unlimited) |
 | `memory-per-model-mb` | `1024` | Memory per model in MB. Passed as `MODEL_MEMORY_LIMIT_MB` to provisioned runners for capacity planning and container memory limits. |
 | `capacity-threshold` | `0.8` | Fraction of CVM capacity at which it reports full (0.0–1.0). Passed as `CAPACITY_THRESHOLD` to provisioned runners. |
-| `gateway-cert-dir` | `null` | Path to coordinator cert dir (key.pem or tls.key). Also settable via `GATEWAY_CERT_DIR` env var. |
+| `gateway-key-path` | `null` | Path to the coordinator RSA private key file (PEM) for gateway auth signing. |
 
 Environment variables (not in YAML):
 
 | Variable | Description |
 |---|---|
 | `PHALA_API_KEY` | Phala Cloud API key |
-| `GATEWAY_CERT_DIR` | Fallback for `gateway-cert-dir` YAML field |
 | `GATEWAY_AUTH_COORDINATOR_WALLET` | Coordinator wallet for spawntee gateway auth |
