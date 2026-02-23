@@ -161,6 +161,11 @@ class PhalaCluster:
         # concurrent mutation (e.g. ensure_capacity racing with register_task).
         self._lock = threading.Lock()
 
+        # Provisioning lock: ensures only one CVM is provisioned at a time.
+        # When a thread starts provisioning, others waiting on ensure_capacity
+        # will see the new CVM once it's ready instead of spawning duplicates.
+        self._provisioning_lock = threading.Lock()
+
         # Discovered CVMs: app_id → CVMInfo
         self.cvms: dict[str, CVMInfo] = {}
 
@@ -580,11 +585,37 @@ class PhalaCluster:
                     )
             return
 
-        logger.info("  No existing CVM has capacity, provisioning new runner...")
-        # Provisioning is a long operation (subprocess + health checks).
-        # It mutates self.cvms and self.head_id at the very end, so we
-        # hold the lock only for the final state update inside _provision_new_runner.
-        self._provision_new_runner()
+        # Provisioning gate: only one thread provisions at a time.
+        # If another thread is already provisioning, we block here and then
+        # re-check capacity — the newly provisioned CVM should have room.
+        if not self._provisioning_lock.acquire(blocking=False):
+            logger.info("  ⏳ Another thread is already provisioning, waiting...")
+            self._provisioning_lock.acquire()  # block until it finishes
+            self._provisioning_lock.release()
+            logger.info("  ↩️ Provisioning completed by another thread, re-checking capacity")
+            return self.ensure_capacity()  # re-run: new CVM should be head
+
+        try:
+            # Re-check: another thread may have provisioned while we were
+            # scanning candidates above (before we got the provisioning lock).
+            for cvm in candidates:
+                try:
+                    if cvm.client.has_capacity():
+                        with self._lock:
+                            if self.head_id == head_id_snapshot:
+                                self.head_id = cvm.app_id
+                                logger.info(
+                                    "📍 Switched head to CVM with capacity (after lock): %s",
+                                    cvm.name,
+                                )
+                        return
+                except SpawnteeClientError:
+                    continue
+
+            logger.info("  🆕 No existing CVM has capacity, provisioning new runner...")
+            self._provision_new_runner()
+        finally:
+            self._provisioning_lock.release()
 
     def _provision_new_runner(self):
         """
