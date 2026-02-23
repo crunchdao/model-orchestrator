@@ -448,9 +448,16 @@ class PhalaCluster:
         raise PhalaClusterError(f"Task {task_id} not found in task routing map")
 
     def all_clients(self) -> list[tuple[str, SpawnteeClient]]:
-        """Return all (app_id, client) pairs for scanning operations."""
+        """Return all (app_id, client) pairs for scanning operations.
+
+        Runners are returned before the registry so that ``is_built`` finds
+        images on the CVM that actually ran them, avoiding funnelling all
+        models back to the registry after an orchestrator DB reset.
+        """
         with self._lock:
-            return [(app_id, cvm.client) for app_id, cvm in self.cvms.items()]
+            runners = [(aid, c.client) for aid, c in self.cvms.items() if c.mode == "runner"]
+            others = [(aid, c.client) for aid, c in self.cvms.items() if c.mode != "runner"]
+            return runners + others
 
     # ─── Capacity management ───
 

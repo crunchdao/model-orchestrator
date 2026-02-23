@@ -99,10 +99,14 @@ class PhalaModelBuilder(Builder):
 
     def is_built(self, model: ModelRun, crunch: Crunch) -> tuple[bool, str]:
         """
-        Check whether a model image already exists on any CVM.
+        Check whether a model image already exists on a CVM **that has capacity**.
 
-        Scans all CVMs since the model could be on any one of them
-        (models are sticky to their CVM).
+        Scans all CVMs (runners first) looking for the image.  If the image
+        exists on a CVM that reports ``accepting_new_models=false``, it is
+        skipped so the model goes through the normal build path which calls
+        ``ensure_capacity`` and routes to a CVM with room.  This prevents
+        funnelling all models to the registry after an orchestrator DB reset
+        (the registry has stale task history for every model ever built).
         """
         submission_id = model.code_submission_id
 
@@ -123,6 +127,15 @@ class PhalaModelBuilder(Builder):
                             f"Spawntee says image exists but response missing "
                             f"'image_name' or 'task_id': {result}"
                         )
+
+                    # Only claim the image if the CVM can accept another model.
+                    # Otherwise skip it — the build path will find capacity.
+                    if not client.has_capacity():
+                        logger.info(
+                            "Image found for %s on CVM %s but CVM has no capacity — skipping",
+                            submission_id, app_id,
+                        )
+                        continue
 
                     logger.debug("Image found for %s on CVM %s", submission_id, app_id)
                     self._cluster.register_task(task_id, app_id)
