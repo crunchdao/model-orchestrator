@@ -605,7 +605,11 @@ class PhalaCluster:
 
         registry_url = f"https://{registry_cvm.app_id}-{self.spawntee_port}.dstack-pha-{registry_cvm.node_name}.phala.network"
 
-        # Deploy via phala CLI (handles compose hashing, API format, etc.)
+        # We shell out to the `phala` CLI instead of calling the Phala Cloud API
+        # directly because the CLI handles x25519+AES-GCM encryption of environment
+        # variables before sending them to the CVM. Re-implementing that crypto
+        # (ECDH key agreement, nonce derivation, authenticated encryption) is
+        # non-trivial and fragile — the CLI already does it correctly.
         coordinator_wallet = os.environ.get("GATEWAY_AUTH_COORDINATOR_WALLET", "")
 
         cmd = [
