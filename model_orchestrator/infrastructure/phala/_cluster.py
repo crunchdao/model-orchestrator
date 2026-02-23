@@ -197,11 +197,15 @@ class PhalaCluster:
             logger.warning("⚠️ No CVMs discovered")
             return
 
-        # Determine head: the last CVM that still has capacity.
-        # Check in reverse order (newest runners first, then registry).
+        # Determine head: pick a CVM that has capacity, preferring
+        # runners over the registry.
         # has_capacity() retries internally; if it still fails, the error
         # propagates — we refuse to guess.
-        for cvm in reversed(list(self.cvms.values())):
+        candidates = sorted(
+            self.cvms.values(),
+            key=lambda c: (0 if c.mode == "runner" else 1),
+        )
+        for cvm in candidates:
             if cvm.client.has_capacity():
                 self.head_id = cvm.app_id
                 logger.info("📍 Head CVM: %s (%s)", cvm.name, cvm.app_id)
@@ -531,10 +535,10 @@ class PhalaCluster:
                 "looking for CVM with capacity...",
                 head.name,
             )
-            candidates = [
-                cvm for cvm in reversed(list(self.cvms.values()))
-                if cvm.app_id != head_id_snapshot
-            ]
+            candidates = sorted(
+                [cvm for cvm in self.cvms.values() if cvm.app_id != head_id_snapshot],
+                key=lambda c: (0 if c.mode == "runner" else 1),
+            )
 
         # ── Phase 3b: scan other CVMs for capacity (no lock — network calls) ──
         new_head_id = None
