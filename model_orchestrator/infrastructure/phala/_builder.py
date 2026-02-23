@@ -109,19 +109,26 @@ class PhalaModelBuilder(Builder):
         for app_id, client in self._cluster.all_clients():
             try:
                 result = client.check_model_image(submission_id)
-                exists = result.get("image_exists", False)
-                image_name = result.get("image_name", "")
-                task_id = result.get("task_id", "")
+                if "image_exists" not in result:
+                    raise SpawnteeClientError(
+                        f"Spawntee /submission-image response missing 'image_exists' field: {result}"
+                    )
 
-                if exists:
+                if result["image_exists"]:
+                    image_name = result.get("image_name")
+                    task_id = result.get("task_id")
+
+                    if not image_name or not task_id:
+                        raise SpawnteeClientError(
+                            f"Spawntee says image exists but response missing "
+                            f"'image_name' or 'task_id': {result}"
+                        )
+
                     logger.debug("Image found for %s on CVM %s", submission_id, app_id)
+                    self._cluster.register_task(task_id, app_id)
+                    model.update_builder_status(task_id, ModelRun.BuilderStatus.SUCCESS)
 
-                    if task_id:
-                        # Record which CVM owns this task
-                        self._cluster.register_task(task_id, app_id)
-                        model.update_builder_status(task_id, ModelRun.BuilderStatus.SUCCESS)
-
-                    return True, f"phala-tee://{image_name}" if image_name else ""
+                    return True, f"phala-tee://{image_name}"
             except SpawnteeAuthenticationError:
                 raise  # critical — do not swallow
             except SpawnteeClientError as e:
@@ -149,8 +156,17 @@ class PhalaModelBuilder(Builder):
             client = self._cluster.client_for_task(task_id)
             try:
                 task = client.get_task(task_id)
-                spawntee_status = task.get("status", "failed")
-                result[model] = _STATUS_MAP.get(spawntee_status, ModelRun.BuilderStatus.FAILED)
+                spawntee_status = task.get("status")
+                if spawntee_status is None:
+                    raise SpawnteeClientError(
+                        f"Spawntee /task response missing 'status' field: {task}"
+                    )
+                mapped = _STATUS_MAP.get(spawntee_status)
+                if mapped is None:
+                    raise SpawnteeClientError(
+                        f"Spawntee returned unknown build task status: {spawntee_status!r}"
+                    )
+                result[model] = mapped
 
             except SpawnteeAuthenticationError:
                 raise  # critical — do not swallow
