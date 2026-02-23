@@ -151,7 +151,7 @@ During operation:
 | `max-models` | `0` | Global cap on total models (0 = unlimited) |
 | `memory-per-model-mb` | `1024` | Memory per model in MB. Passed as `MODEL_MEMORY_LIMIT_MB` to provisioned runners for capacity planning and container memory limits. |
 | `capacity-threshold` | `0.8` | Fraction of CVM capacity at which it reports full (0.0–1.0). Passed as `CAPACITY_THRESHOLD` to provisioned runners. |
-| `gateway-key-path` | `null` | Path to the coordinator RSA private key file (PEM) for gateway auth signing. |
+| `gateway-key-path` | *required* | Path to the coordinator RSA private key file (PEM) for gateway auth signing. |
 
 Environment variables (not in YAML):
 

@@ -93,6 +93,7 @@ class PhalaCluster:
     def __init__(
         self,
         cluster_name: str,
+        gateway_key_path: str,
         spawntee_port: int = 9010,
         request_timeout: int = 30,
         phala_api_url: str = "",
@@ -100,7 +101,6 @@ class PhalaCluster:
         instance_type: str = "tdx.medium",
         max_models: int = 0,
         memory_per_model_mb: int = 256,
-        gateway_key_path: str | None = None,
         capacity_threshold: float = 0.8,
     ):
         """
@@ -128,23 +128,20 @@ class PhalaCluster:
         self.runner_compose_path = runner_compose_path
 
         # Load coordinator gateway credentials for spawntee API auth.
-        if gateway_key_path:
-            if GatewayCredentials is None:
-                raise PhalaClusterError(
-                    "gateway_key_path is set but model_runner_client is not installed. "
-                    "Install it with: pip install model-runner-client"
-                )
-            key_path = Path(gateway_key_path)
-            if not key_path.exists():
-                raise PhalaClusterError(
-                    f"Gateway key file not found: {gateway_key_path}"
-                )
-            self.gateway_credentials = GatewayCredentials.from_pem(
-                key_pem=key_path.read_bytes(),
+        if GatewayCredentials is None:
+            raise PhalaClusterError(
+                "model_runner_client is not installed. "
+                "Install it with: pip install model-runner-client"
             )
-            logger.info("🔑 Loaded gateway credentials from %s", key_path)
-        else:
-            self.gateway_credentials = None
+        key_path = Path(gateway_key_path)
+        if not key_path.exists():
+            raise PhalaClusterError(
+                f"Gateway key file not found: {gateway_key_path}"
+            )
+        self.gateway_credentials = GatewayCredentials.from_pem(
+            key_pem=key_path.read_bytes(),
+        )
+        logger.info("🔑 Loaded gateway credentials from %s", key_path)
 
         # Instance type is only used when provisioning new runner CVMs.
         self.instance_type = instance_type

@@ -61,7 +61,7 @@ class PhalaRunnerInfrastructureConfig(_BaseConfig):
     memory_per_model_mb: int = Field(1024, description="Estimated memory per model container in MB. Used to calculate max models per CVM.")
     capacity_threshold: float = Field(0.8, description="Fraction of CVM capacity at which it reports full (0.0-1.0). Passed as CAPACITY_THRESHOLD to provisioned runner CVMs.")
     max_models: int = Field(0, description="Global maximum number of models across the entire cluster. 0 = unlimited.")
-    gateway_key_path: str | None = Field(None, description="Path to the coordinator RSA private key file (PEM) for gateway auth signing.")
+    gateway_key_path: str = Field(..., description="Path to the coordinator RSA private key file (PEM) for gateway auth signing.")
 
 
 RunnerInfrastructureConfig = Union[AwsRunnerInfrastructureConfig, LocalRunnerInfrastructureConfig, PhalaRunnerInfrastructureConfig]
