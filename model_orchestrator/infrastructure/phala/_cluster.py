@@ -330,6 +330,9 @@ class PhalaCluster:
     def _probe_mode(self, client: SpawnteeClient, label: str) -> str | None:
         """Probe a CVM's /health endpoint to determine its mode.
 
+        Returns None if the CVM is not a spawntee service (caller should skip it).
+        Raises PhalaClusterError if it is a spawntee service but has no mode.
+
         health() retries internally on transient errors. If it still fails
         (auth error, retries exhausted), the exception propagates — we
         refuse to silently skip a CVM we can't reach.
@@ -338,7 +341,12 @@ class PhalaCluster:
         if health.get("service") != "secure-spawn":
             logger.warning("  ⚠️ %s is not a spawntee service, skipping", label)
             return None
-        return health.get("mode", "unknown")
+        mode = health.get("mode")
+        if not mode:
+            raise PhalaClusterError(
+                f"CVM {label} is a spawntee service but has no 'mode' in health response"
+            )
+        return mode
 
     def _approve_runner_hashes_on_registry(self):
         """
