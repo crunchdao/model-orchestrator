@@ -101,8 +101,7 @@ class PhalaCluster:
         max_models: int = 0,
         memory_per_model_mb: int = 256,
         gateway_cert_dir: str | None = None,
-        # Deprecated — kept for config compat, ignored at runtime
-        provision_factor: float = 0.0,
+        capacity_threshold: float = 0.8,
     ):
         """
         Args:
@@ -118,6 +117,8 @@ class PhalaCluster:
             memory_per_model_mb: Memory budget per model in MB. Passed to runner CVMs
                 as MODEL_MEMORY_LIMIT_MB env var at deploy time. The CVM uses it for
                 capacity planning (max_models) and container enforcement (ulimit).
+            capacity_threshold: Fraction of CVM capacity at which it reports full
+                (0.0–1.0). Passed as CAPACITY_THRESHOLD env var to provisioned runners.
         """
         self.cluster_name = cluster_name
         self.spawntee_port = spawntee_port
@@ -155,6 +156,7 @@ class PhalaCluster:
         self.instance_type = instance_type
         self.max_models = max_models  # 0 = unlimited
         self.memory_per_model_mb = memory_per_model_mb
+        self.capacity_threshold = capacity_threshold
 
         if instance_type not in INSTANCE_TYPE_MEMORY_MB:
             raise PhalaClusterError(
@@ -163,10 +165,10 @@ class PhalaCluster:
             )
 
         logger.info(
-            "📐 Capacity: instance=%s, model_memory=%dMB, global_max=%s "
-            "(CVM decides accepting_new_models via CAPACITY_THRESHOLD + MODEL_MEMORY_LIMIT_MB)",
+            "📐 Capacity: instance=%s, model_memory=%dMB, capacity_threshold=%.2f, global_max=%s",
             instance_type,
             memory_per_model_mb,
+            capacity_threshold,
             max_models or "unlimited",
         )
 
@@ -624,7 +626,7 @@ class PhalaCluster:
             "--instance-type", self.instance_type,
             "--compose", self.runner_compose_path,
             "-e", f"REGISTRY_URL={registry_url}",
-            "-e", f"CAPACITY_THRESHOLD={os.environ.get('CAPACITY_THRESHOLD', '0.8')}",
+            "-e", f"CAPACITY_THRESHOLD={self.capacity_threshold}",
             "-e", f"MODEL_MEMORY_LIMIT_MB={self.memory_per_model_mb}",
         ]
         if coordinator_wallet:

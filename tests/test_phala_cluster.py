@@ -257,16 +257,17 @@ class TestInitValidation:
         with pytest.raises(PhalaClusterError, match="Unknown instance type"):
             PhalaCluster(cluster_name="", instance_type="tdx.nonexistent")
 
-    def test_deprecated_params_accepted(self):
-        """memory_per_model_mb and provision_factor are accepted but ignored."""
+    def test_capacity_params_stored(self):
+        """memory_per_model_mb and capacity_threshold are stored for provisioning."""
         cluster = PhalaCluster(
             cluster_name="",
             instance_type="tdx.large",
             memory_per_model_mb=1024,
-            provision_factor=1.5,
+            capacity_threshold=0.7,
         )
-        # Should not raise — params are accepted for backward compat
         assert cluster.instance_type == "tdx.large"
+        assert cluster.memory_per_model_mb == 1024
+        assert cluster.capacity_threshold == 0.7
 
 
 class TestEnsureCapacity:

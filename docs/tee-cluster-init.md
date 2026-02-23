@@ -104,6 +104,7 @@ infrastructure:
     instance-type: "tdx.medium"
     max-models: 0
     memory-per-model-mb: 1024
+    capacity-threshold: 0.8
     gateway-cert-dir: "/path/to/coordinator/certs"
 ```
 
@@ -150,7 +151,7 @@ During operation:
 | `instance-type` | `tdx.medium` | Phala CVM instance type for new runners |
 | `max-models` | `0` | Global cap on total models (0 = unlimited) |
 | `memory-per-model-mb` | `1024` | Memory per model in MB. Passed as `MODEL_MEMORY_LIMIT_MB` to provisioned runners for capacity planning and container memory limits. |
-| `provision-factor` | `0.8` | Accepted for backward compatibility, not used at runtime |
+| `capacity-threshold` | `0.8` | Fraction of CVM capacity at which it reports full (0.0–1.0). Passed as `CAPACITY_THRESHOLD` to provisioned runners. |
 | `gateway-cert-dir` | `null` | Path to coordinator cert dir (key.pem or tls.key). Also settable via `GATEWAY_CERT_DIR` env var. |
 
 Environment variables (not in YAML):
@@ -160,4 +161,3 @@ Environment variables (not in YAML):
 | `PHALA_API_KEY` | Phala Cloud API key |
 | `GATEWAY_CERT_DIR` | Fallback for `gateway-cert-dir` YAML field |
 | `GATEWAY_AUTH_COORDINATOR_WALLET` | Coordinator wallet for spawntee gateway auth |
-| `CAPACITY_THRESHOLD` | Passed to provisioned runners (default `0.8`) |

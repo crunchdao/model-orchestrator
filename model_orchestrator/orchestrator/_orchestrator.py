@@ -94,7 +94,7 @@ class Orchestrator:
                     runner_compose_path=runner_config.runner_compose_path,
                     instance_type=runner_config.instance_type,
                     memory_per_model_mb=runner_config.memory_per_model_mb,
-                    provision_factor=runner_config.provision_factor,
+                    capacity_threshold=runner_config.capacity_threshold,
                     max_models=runner_config.max_models,
                     gateway_cert_dir=runner_config.gateway_cert_dir,
                 )

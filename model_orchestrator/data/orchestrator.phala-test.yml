@@ -21,7 +21,7 @@ infrastructure:
     request-timeout: 60
     instance-type: "tdx.medium"      # 2 vCPU, 4 GB RAM — for auto-provisioned runners
     memory-per-model-mb: 1024        # 1 GB per model container
-    provision-factor: 0.8            # provision new CVM at 80% of calculated max
+    capacity-threshold: 0.8          # CVM reports full at 80% capacity
     max-models: 20                   # global cap across the entire cluster
 
 watcher:

@@ -59,7 +59,7 @@ class PhalaRunnerInfrastructureConfig(_BaseConfig):
     runner_compose_path: str = Field("", description="Path to docker-compose.phala.runner.yml for auto-provisioning new runner CVMs")
     instance_type: str = Field("tdx.medium", description="Phala CVM instance type for auto-provisioned runners (e.g. tdx.small, tdx.medium, tdx.large)")
     memory_per_model_mb: int = Field(1024, description="Estimated memory per model container in MB. Used to calculate max models per CVM.")
-    provision_factor: float = Field(0.8, description="Fraction of max_models_per_cvm at which to provision a new CVM (0.0-1.0). E.g. 0.8 means trigger at 80%% capacity.")
+    capacity_threshold: float = Field(0.8, description="Fraction of CVM capacity at which it reports full (0.0-1.0). Passed as CAPACITY_THRESHOLD to provisioned runner CVMs.")
     max_models: int = Field(0, description="Global maximum number of models across the entire cluster. 0 = unlimited.")
     gateway_cert_dir: str | None = Field(None, description="Path to coordinator cert directory (containing key.pem) for gateway auth signing. Can also be set via GATEWAY_CERT_DIR env var.")
 
