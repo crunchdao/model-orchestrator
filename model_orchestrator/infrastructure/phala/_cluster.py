@@ -388,23 +388,31 @@ class PhalaCluster:
 
     def rebuild_task_map(self):
         """
-        Scan all CVMs for running models and rebuild the task → CVM mapping.
+        Scan all CVMs for persisted tasks and rebuild the task → CVM mapping.
 
         Called on startup to recover task routing after an orchestrator restart.
+        Uses /tasks (persisted state) rather than /running_models so that tasks
+        are recovered even when Docker containers were lost (e.g. CVM restart).
         """
         with self._lock:
             self._rebuild_task_map_unlocked()
 
     def _rebuild_task_map_unlocked(self):
-        """Scan all CVMs for running models. Errors propagate after retries."""
+        """Scan all CVMs for persisted tasks and rebuild the task → CVM mapping.
+
+        Uses GET /tasks (persisted task state) instead of GET /running_models
+        so that tasks survive CVM restarts even when Docker containers are lost.
+        The CVM enriches dead-container tasks as 'failed', which the orchestrator's
+        update_runner_states will pick up and handle via normal error recovery.
+        """
         self.task_client_map.clear()
         for app_id, cvm in self.cvms.items():
-            running = cvm.client.get_running_models()
-            for model in running:
-                task_id = model.get("task_id")
+            tasks = cvm.client.get_tasks()
+            for task in tasks:
+                task_id = task.get("task_id")
                 if task_id:
                     self.task_client_map[task_id] = app_id
-            logger.info("  📋 %s: %d running model(s)", cvm.name, len(running))
+            logger.info("  📋 %s: %d persisted task(s)", cvm.name, len(tasks))
 
         logger.info("✅ Task map rebuilt: %d task(s) across %d CVM(s)",
                      len(self.task_client_map), len(self.cvms))

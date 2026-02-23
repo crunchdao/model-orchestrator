@@ -267,6 +267,21 @@ class SpawnteeClient:
         """
         return self._request("GET", f"/task/{task_id}", max_retries=DEFAULT_MAX_RETRIES).json()
 
+    def get_tasks(self) -> list[dict]:
+        """
+        GET /tasks — list all persisted tasks on this CVM.
+
+        Returns list of task dicts with task_id, status, current_operation, etc.
+        Unlike get_running_models(), this includes tasks whose containers have
+        died (e.g. after a CVM restart) — the CVM enriches those as 'failed'.
+        """
+        response = self._request("GET", "/tasks", max_retries=DEFAULT_MAX_RETRIES).json()
+        if "tasks" not in response:
+            raise SpawnteeClientError(
+                f"Spawntee /tasks response missing 'tasks' field: {response}"
+            )
+        return response["tasks"]
+
     def get_running_models(self) -> list[dict]:
         """
         GET /running_models — list all running model containers.
