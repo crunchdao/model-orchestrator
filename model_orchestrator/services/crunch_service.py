@@ -68,18 +68,21 @@ class CrunchService:
         config_crunches = []
 
         for crunch_config in self.config.crunches:
+            if not crunch_config.infrastructure:
+                raise ValueError(f"Missing infrastructure configuration for crunch {crunch_config.id}")
+
             # For local and phala runners, don't create CPU/GPU configs
             if runner_type in (RunnerType.LOCAL, RunnerType.PHALA):
                 infrastructure = Infrastructure(
-                    cluster_name=crunch_config.infrastructure.cluster_name if crunch_config.infrastructure else None,
-                    zone=crunch_config.infrastructure.zone if crunch_config.infrastructure else "tee" if runner_type == RunnerType.PHALA else "local",
+                    cluster_name=crunch_config.infrastructure.cluster_name,
+                    zone=crunch_config.infrastructure.zone,
                     runner_type=runner_type,
                     cpu_config=None,
                     gpu_config=None
                 )
             else:
                 # For AWS runner, require full infrastructure config
-                if not crunch_config.infrastructure or not crunch_config.infrastructure.cpu_config or not crunch_config.infrastructure.gpu_config:
+                if not crunch_config.infrastructure.cpu_config or not crunch_config.infrastructure.gpu_config:
                     raise ValueError(f"AWS runner requires full infrastructure configuration for crunch {crunch_config.id}")
 
                 infrastructure = Infrastructure(
