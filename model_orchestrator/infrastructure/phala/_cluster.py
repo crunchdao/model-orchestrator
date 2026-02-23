@@ -307,20 +307,25 @@ class PhalaCluster:
         return cvm["compose_hash"]
 
     def _get_node_name(self, app_id: str) -> str:
-        """Look up a CVM's node name from the Phala API."""
-        try:
-            headers = {"X-API-Key": self.phala_api_key}
-            response = requests.get(
-                f"{self.phala_api_url}/api/v1/cvms/{app_id}",
-                headers=headers,
-                timeout=15,
+        """Look up a CVM's node name from the Phala API.
+
+        Raises PhalaClusterError if the node name cannot be retrieved or is missing.
+        """
+        headers = {"X-API-Key": self.phala_api_key}
+        response = requests.get(
+            f"{self.phala_api_url}/api/v1/cvms/{app_id}",
+            headers=headers,
+            timeout=15,
+        )
+        response.raise_for_status()
+        cvm = response.json()
+        node_info = cvm.get("node_info") or {}
+        name = node_info.get("name", "")
+        if not name:
+            raise PhalaClusterError(
+                f"CVM {app_id} has no node_info.name in Phala API response"
             )
-            response.raise_for_status()
-            cvm = response.json()
-            return cvm.get("node_info", {}).get("name", "")
-        except Exception as e:
-            logger.warning("  Could not look up node_name for %s: %s", app_id, e)
-        return ""
+        return name
 
     def _probe_mode(self, client: SpawnteeClient, label: str) -> str | None:
         """Probe a CVM's /health endpoint to determine its mode.
@@ -651,10 +656,6 @@ class PhalaCluster:
 
         # Get node_name from API (deploy output doesn't include it)
         node_name = self._get_node_name(new_app_id)
-        if not node_name:
-            raise PhalaClusterError(
-                f"CVM {cvm_name} deployed (app_id={new_app_id}) but could not determine node_name from API"
-            )
 
         logger.info("  ✅ CVM created: %s (app_id=%s)", cvm_name, new_app_id)
 

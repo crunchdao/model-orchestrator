@@ -136,7 +136,7 @@ class TestGetNodeName:
             timeout=15,
         )
 
-    def test_returns_empty_on_missing_node_info(self):
+    def test_raises_on_missing_node_info(self):
         cluster = PhalaCluster(
             cluster_name="test",
             phala_api_url="https://mock-api",
@@ -148,11 +148,10 @@ class TestGetNodeName:
         with patch("requests.get") as mock_get:
             mock_get.return_value = MagicMock(status_code=200, json=lambda: cvm_response)
             mock_get.return_value.raise_for_status = MagicMock()
-            result = cluster._get_node_name("abc123")
+            with pytest.raises(PhalaClusterError, match="no node_info.name"):
+                cluster._get_node_name("abc123")
 
-        assert result == ""
-
-    def test_returns_empty_on_api_error(self):
+    def test_raises_on_api_error(self):
         cluster = PhalaCluster(
             cluster_name="test",
             phala_api_url="https://mock-api",
@@ -161,9 +160,8 @@ class TestGetNodeName:
 
         with patch("requests.get") as mock_get:
             mock_get.side_effect = Exception("Connection refused")
-            result = cluster._get_node_name("abc123")
-
-        assert result == ""
+            with pytest.raises(Exception, match="Connection refused"):
+                cluster._get_node_name("abc123")
 
 
 class TestHeadTracking:
