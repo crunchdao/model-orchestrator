@@ -215,12 +215,12 @@ class PhalaCluster:
             # All CVMs report full (but reachable). Use the registry as head;
             # ensure_capacity will provision a new runner when a build arrives.
             registry = next((c for c in self.cvms.values() if "registry" in c.mode), None)
-            if registry:
-                self.head_id = registry.app_id
-                logger.warning("⚠️ No CVM has capacity, defaulting head to registry: %s", registry.name)
-            else:
-                self.head_id = next(iter(self.cvms))
-                logger.warning("⚠️ No registry found, defaulting head to: %s", self.head_id)
+            if not registry:
+                raise PhalaClusterError(
+                    "No registry CVM found in cluster — cannot operate without a registry"
+                )
+            self.head_id = registry.app_id
+            logger.warning("⚠️ No CVM has capacity, defaulting head to registry: %s", registry.name)
 
         logger.info("✅ Discovered %d CVM(s), head=%s", len(self.cvms), self.head_id)
 
