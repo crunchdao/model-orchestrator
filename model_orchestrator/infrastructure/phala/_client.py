@@ -26,7 +26,7 @@ from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from ...utils.logging_utils import get_logger
 
 if TYPE_CHECKING:
-    from model_runner_client.security.gateway_credentials import GatewayCredentials
+    from ._gateway_credentials import GatewayCredentials
 
 logger = get_logger()
 

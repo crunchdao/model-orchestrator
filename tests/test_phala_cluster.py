@@ -15,23 +15,21 @@ from model_orchestrator.infrastructure.phala._cluster import (
 from model_orchestrator.infrastructure.phala._client import SpawnteeClient, SpawnteeClientError  # noqa: F401
 
 
-# Stub GatewayCredentials so PhalaCluster can load without model_runner_client
-class _StubGatewayCredentials:
-    @classmethod
-    def from_pem(cls, key_pem):
-        return cls()
-
-
 @pytest.fixture(autouse=True)
 def _patch_gateway_credentials(tmp_path):
     """Patch GatewayCredentials and provide a dummy key file for all tests."""
     dummy_key = tmp_path / "key.pem"
     dummy_key.write_text("stub")
+
+    class _StubGatewayCredentials:
+        @classmethod
+        def from_pem(cls, key_pem):
+            return cls()
+
     with patch(
         "model_orchestrator.infrastructure.phala._cluster.GatewayCredentials",
         _StubGatewayCredentials,
     ):
-        # Monkey-patch the default so tests that don't pass gateway_key_path still work
         _orig_init = PhalaCluster.__init__
 
         def _patched_init(self, *args, **kwargs):

@@ -33,10 +33,7 @@ import requests
 
 from ._client import SpawnteeAuthenticationError, SpawnteeClient, SpawnteeClientError
 
-try:
-    from model_runner_client.security.gateway_credentials import GatewayCredentials
-except ImportError:
-    GatewayCredentials = None  # type: ignore[misc,assignment]
+from ._gateway_credentials import GatewayCredentials
 
 logger = logging.getLogger(__name__)
 
@@ -128,11 +125,6 @@ class PhalaCluster:
         self.runner_compose_path = runner_compose_path
 
         # Load coordinator gateway credentials for spawntee API auth.
-        if GatewayCredentials is None:
-            raise PhalaClusterError(
-                "model_runner_client is not installed. "
-                "Install it with: pip install model-runner-client"
-            )
         key_path = Path(gateway_key_path)
         if not key_path.exists():
             raise PhalaClusterError(
