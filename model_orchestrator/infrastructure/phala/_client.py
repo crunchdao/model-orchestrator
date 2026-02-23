@@ -274,7 +274,11 @@ class SpawnteeClient:
         Returns list of running model dicts with task_id, container_id, status, port.
         """
         response = self._request("GET", "/running_models", max_retries=DEFAULT_MAX_RETRIES).json()
-        return response.get("running_models", [])
+        if "running_models" not in response:
+            raise SpawnteeClientError(
+                f"Spawntee /running_models response missing 'running_models' field: {response}"
+            )
+        return response["running_models"]
 
     def check_model_image(self, submission_id: str) -> dict:
         """
@@ -301,7 +305,12 @@ class SpawnteeClient:
         Raises on auth errors (401/403) and after retries are exhausted —
         the caller must not make capacity decisions without a real answer.
         """
-        return self.capacity().get("accepting_new_models", False)
+        result = self.capacity()
+        if "accepting_new_models" not in result:
+            raise SpawnteeClientError(
+                f"Spawntee /capacity response missing 'accepting_new_models' field: {result}"
+            )
+        return result["accepting_new_models"]
 
 
 
