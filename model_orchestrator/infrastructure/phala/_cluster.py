@@ -232,21 +232,20 @@ class PhalaCluster:
             logger.warning("⚠️ Could not approve runner hashes during discover (will retry on provision): %s", e)
 
     def _discover_from_api(self):
-        """Query Phala Cloud API for CVMs matching our cluster name prefix."""
+        """Query Phala Cloud API for CVMs matching our cluster name prefix.
+
+        Raises on API errors — discovery must not silently return an empty cluster.
+        """
         logger.info("🔍 Discovering CVMs from Phala API (prefix=%s)...", self.cluster_name)
 
-        try:
-            headers = {"X-API-Key": self.phala_api_key}
-            response = requests.get(
-                f"{self.phala_api_url}/api/v1/cvms",
-                headers=headers,
-                timeout=15,
-            )
-            response.raise_for_status()
-            all_cvms = response.json()
-        except Exception as e:
-            logger.error("❌ Phala API request failed: %s", e)
-            return
+        headers = {"X-API-Key": self.phala_api_key}
+        response = requests.get(
+            f"{self.phala_api_url}/api/v1/cvms",
+            headers=headers,
+            timeout=15,
+        )
+        response.raise_for_status()
+        all_cvms = response.json()
 
         # Filter by name prefix
         matching = [c for c in all_cvms if c.get("name", "").startswith(self.cluster_name)]
@@ -255,13 +254,19 @@ class PhalaCluster:
 
         for cvm_data in matching:
             app_id = cvm_data["app_id"]
-            name = cvm_data.get("name", "")
-            node_name = cvm_data.get("node_info", {}).get("name", "")
+            name = cvm_data["name"]
+            node_info = cvm_data.get("node_info") or {}
+            node_name = node_info.get("name", "")
             status = cvm_data.get("status", "")
 
             if status != "running":
                 logger.info("  Skipping %s (%s) - status=%s", name, app_id, status)
                 continue
+
+            if not node_name:
+                raise PhalaClusterError(
+                    f"CVM {name} ({app_id}) has no node_info.name in Phala API list response"
+                )
 
             # Build URL template from app_id and node_name
             url_template = f"https://{app_id}-<model-port>.dstack-pha-{node_name}.phala.network"
