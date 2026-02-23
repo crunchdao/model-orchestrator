@@ -400,24 +400,34 @@ class PhalaCluster:
     def _rebuild_task_map_unlocked(self):
         """Scan all CVMs for persisted tasks and rebuild the task → CVM mapping.
 
-        Only includes tasks that are still active (pending, running, or
-        completed with a start_model operation — i.e. a running container).
-        Failed and stopped tasks are excluded so they don't count against
-        the global model cap.
+        Only includes tasks that represent live models:
+        - pending/running: build or start in progress
+        - completed with current_operation=start_model: container is running
+
+        Completed builds (build_model:completed) without a subsequent start
+        are just routing info — they don't consume a model slot.  Failed and
+        stopped tasks are excluded entirely.
         """
-        _ACTIVE_STATUSES = {"pending", "running", "completed"}
         self.task_client_map.clear()
         for app_id, cvm in self.cvms.items():
             tasks = cvm.client.get_tasks()
-            active = 0
+            live = 0
             for task in tasks:
                 task_id = task.get("task_id")
                 status = task.get("status")
-                if task_id and status in _ACTIVE_STATUSES:
+                current_op = task.get("current_operation")
+                if not task_id:
+                    continue
+                # In-progress operations count as live
+                if status in ("pending", "running"):
                     self.task_client_map[task_id] = app_id
-                    active += 1
-            logger.info("  📋 %s: %d active / %d total persisted task(s)",
-                        cvm.name, active, len(tasks))
+                    live += 1
+                # Completed start_model = running container
+                elif status == "completed" and current_op == "start_model":
+                    self.task_client_map[task_id] = app_id
+                    live += 1
+            logger.info("  📋 %s: %d live / %d total persisted task(s)",
+                        cvm.name, live, len(tasks))
 
         logger.info("✅ Task map rebuilt: %d task(s) across %d CVM(s)",
                      len(self.task_client_map), len(self.cvms))
