@@ -243,14 +243,14 @@ class TestTaskRouting:
         assert cluster.client_for_task("task-abc") is client1
         assert cluster.client_for_task("task-def") is client2
 
-    def test_unknown_task_falls_back_to_head(self):
+    def test_unknown_task_raises(self):
         cluster = PhalaCluster(cluster_name="")
         client1 = MagicMock(spec=SpawnteeClient)
         cluster.cvms = {"cvm1": CVMInfo("cvm1", "reg", client1)}
         cluster.head_id = "cvm1"
 
-        result = cluster.client_for_task("unknown-task")
-        assert result is client1
+        with pytest.raises(PhalaClusterError, match="not found in task routing map"):
+            cluster.client_for_task("unknown-task")
 
     def test_rebuild_task_map(self):
         cluster = PhalaCluster(cluster_name="")

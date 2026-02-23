@@ -439,16 +439,13 @@ class PhalaCluster:
         """
         Get the client for the CVM that owns a given task.
 
-        Falls back to head client if the task is not in the map
-        (e.g. first poll after build, before map is updated).
+        Raises PhalaClusterError if the task is not in the map.
         """
         with self._lock:
             app_id = self.task_client_map.get(task_id)
             if app_id and app_id in self.cvms:
                 return self.cvms[app_id].client
-        # Fallback: try all CVMs (task might exist on a CVM we haven't mapped yet)
-        logger.debug("Task %s not in map, falling back to scan", task_id)
-        return self.head_client()
+        raise PhalaClusterError(f"Task {task_id} not found in task routing map")
 
     def all_clients(self) -> list[tuple[str, SpawnteeClient]]:
         """Return all (app_id, client) pairs for scanning operations."""
