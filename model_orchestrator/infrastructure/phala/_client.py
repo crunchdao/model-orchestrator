@@ -17,8 +17,6 @@ import base64
 import json
 import time
 from typing import TYPE_CHECKING
-from urllib.parse import urlparse
-
 import requests
 
 from cryptography.hazmat.primitives import hashes
@@ -102,24 +100,6 @@ class SpawnteeClient:
     def _build_url(self, port: int) -> str:
         """Build a full URL by substituting the port into the template."""
         return self._cluster_url_template.replace("<model-port>", str(port))
-
-    def model_grpc_url(self, port: int) -> tuple[str, int]:
-        """
-        Construct the external hostname and port for a model's gRPC service.
-
-        The CVM exposes each model on a unique port. The external URL follows
-        the same pattern as the spawntee URL but with the model's port.
-
-        Args:
-            port: The externally-mapped gRPC port (e.g. 50001)
-
-        Returns:
-            Tuple of (hostname, port) for gRPC connection.
-            hostname is the full URL with the port baked into the subdomain.
-        """
-        url = self._build_url(port)
-        parsed = urlparse(url)
-        return parsed.hostname, 443
 
     def _build_auth_headers(self, path: str) -> dict[str, str]:
         """Sign a request with the coordinator RSA key.

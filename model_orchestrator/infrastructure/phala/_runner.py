@@ -108,20 +108,29 @@ class PhalaModelRunner(Runner):
         for model in models:
             task_id = model.runner_job_id
             if not task_id:
-                result[model] = (ModelRun.RunnerStatus.FAILED, '', 0)
-                continue
+                raise ValueError(
+                    f"Model {model.model_id} has no runner_job_id — cannot poll status"
+                )
 
             client = self._cluster.client_for_task(task_id)
             try:
                 task = client.get_task(task_id)
-                spawntee_status = task.get("status", "failed")
-                status = _STATUS_MAP.get(spawntee_status, ModelRun.RunnerStatus.FAILED)
+                spawntee_status = task.get("status")
+                if spawntee_status is None:
+                    raise SpawnteeClientError(
+                        f"Spawntee /task response missing 'status' field: {task}"
+                    )
+                status = _STATUS_MAP.get(spawntee_status)
+                if status is None:
+                    raise SpawnteeClientError(
+                        f"Spawntee returned unknown runner task status: {spawntee_status!r}"
+                    )
 
                 ip = ''
                 port = 0
 
                 if status == ModelRun.RunnerStatus.RUNNING:
-                    ip, port = self._extract_grpc_address(client, task)
+                    ip, port = self._extract_grpc_address(task)
 
                 # Check if the model was actually stopped via stop operation
                 if spawntee_status == "completed":
@@ -151,8 +160,9 @@ class PhalaModelRunner(Runner):
         """
         task_id = model.runner_job_id
         if not task_id:
-            logger.warning("Cannot stop model %s — no runner_job_id", model.model_id)
-            return ""
+            raise ValueError(
+                f"Model {model.model_id} has no runner_job_id — cannot stop"
+            )
 
         client = self._cluster.client_for_task(task_id)
 
@@ -160,38 +170,38 @@ class PhalaModelRunner(Runner):
 
         try:
             result = client.stop_model(task_id)
+            if "task_id" not in result:
+                raise SpawnteeClientError(
+                    f"Spawntee /stop-model response missing 'task_id' field: {result}"
+                )
             logger.info("Stop submitted: task_id=%s for model=%s", task_id, model.model_id)
-            return result.get("task_id", task_id)
+            return result["task_id"]
         except SpawnteeClientError as e:
             logger.error("Failed to stop model %s (task %s): %s", model.model_id, task_id, e)
             raise
 
-    def _extract_grpc_address(self, client, task: dict) -> tuple[str, int]:
+    def _extract_grpc_address(self, task: dict) -> tuple[str, int]:
         """
         Extract the external gRPC hostname and port from a spawntee task.
 
-        Prefers external_grpc_hostname/external_grpc_port from task metadata
-        (set by newer spawntee versions that include the full hostname with
-        gRPC routing suffix). Falls back to constructing the URL from the
-        port template for legacy spawntee deployments.
+        Requires external_grpc_hostname and external_grpc_port in the task's
+        container metadata. Raises SpawnteeClientError if missing.
         """
-        metadata = task.get("metadata") or {}
-        container = metadata.get("container") or {}
+        task_id = task.get("task_id", "?")
+        metadata = task.get("metadata")
+        if not metadata or not metadata.get("container"):
+            raise SpawnteeClientError(
+                f"Task {task_id} is RUNNING but has no container metadata: {task}"
+            )
+        container = metadata["container"]
 
-        # Prefer external hostname from spawntee (includes g suffix)
-        external_hostname = container.get("external_grpc_hostname")
-        external_port = container.get("external_grpc_port", 443)
-        if external_hostname:
-            logger.debug("Model gRPC endpoint (from metadata): %s:%d", external_hostname, external_port)
-            return external_hostname, external_port
+        hostname = container.get("external_grpc_hostname")
+        port = container.get("external_grpc_port")
+        if not hostname or port is None:
+            raise SpawnteeClientError(
+                f"Task {task_id} container metadata missing "
+                f"external_grpc_hostname or external_grpc_port: {container}"
+            )
 
-        # Fallback: construct from URL template (legacy spawntee without external hostname)
-        model_port = container.get("port")
-        if not model_port:
-            logger.warning("Task %s has no container port in metadata", task.get("task_id"))
-            return '', 0
-
-        model_port = int(model_port)
-        hostname, port = client.model_grpc_url(model_port)
-        logger.debug("Model gRPC endpoint (from template): %s:%d (CVM port %d)", hostname, port, model_port)
-        return hostname, port
+        logger.debug("Model gRPC endpoint: %s:%d", hostname, port)
+        return hostname, int(port)
