@@ -17,10 +17,11 @@
 #   3. Write env files
 #   4. Build & push Docker image (optional)
 #   5. Deploy registry CVM
-#   6. Deploy runner CVM
-#   7. Configure attestation (APPROVED_COMPOSE_HASH)
-#   8. Write orchestrator .env
-#   9. Verify & summary
+#   6. Write orchestrator .env
+#   7. Verify & summary
+#
+# Runner provisioning and compose-hash attestation are handled automatically
+# by the orchestrator at runtime (via PhalaCluster).
 #
 set -euo pipefail
 
@@ -446,154 +447,9 @@ if [[ "$HEALTHY" != true ]]; then
 fi
 info "Registry CVM is healthy: $REGISTRY_URL"
 
-# ── Phase 6: Get runner compose_hash ──────────────────────────
-#
-# The registry needs to know the runner's compose_hash for attestation.
-# Phala computes this hash server-side, so we must deploy a temporary
-# runner to discover it. We delete it immediately after.
+# ── Phase 6: Write orchestrator .env ──────────────────────────
 
-phase "Phase 6: Get runner compose_hash (temporary deploy)"
-
-TEMP_RUNNER_NAME="${CLUSTER_NAME}-temp-runner"
-
-echo "Deploying temporary runner CVM to discover compose_hash..."
-echo "  This runner will be deleted after we grab the hash."
-echo ""
-
-RUNNER_DEPLOY_OUT=$(phala deploy \
-    --name "$TEMP_RUNNER_NAME" \
-    --instance-type "$INSTANCE_TYPE" \
-    --compose "$PHALA_ROOT/spawntee/docker-compose.phala.runner.yml" \
-    -e "REGISTRY_URL=$REGISTRY_URL" \
-    -e "GATEWAY_AUTH_COORDINATOR_WALLET=$GATEWAY_AUTH_COORDINATOR_WALLET" \
-    --api-key "$PHALA_API_KEY" \
-    --json \
-    --wait \
-    2>&1) || {
-    err "Temporary runner deploy failed"
-    echo "$RUNNER_DEPLOY_OUT"
-    exit 1
-}
-
-# Parse app_id
-TEMP_RUNNER_APP_ID=$(echo "$RUNNER_DEPLOY_OUT" | python3 -c "
-import sys, json
-text = sys.stdin.read()
-idx = text.find('{')
-if idx >= 0:
-    obj = json.loads(text[idx:text.rfind('}')+1])
-    print(obj.get('app_id', ''))
-" 2>/dev/null)
-
-if [[ -z "$TEMP_RUNNER_APP_ID" ]]; then
-    TEMP_RUNNER_APP_ID=$(phala cvms list --json --api-key "$PHALA_API_KEY" 2>/dev/null \
-        | python3 -c "
-import sys, json
-data = json.load(sys.stdin)
-cvms = data.get('items', data) if isinstance(data, dict) else data
-for c in cvms:
-    name = c.get('cvmName') or c.get('name', '')
-    if name == '$TEMP_RUNNER_NAME':
-        print(c.get('appId') or c.get('app_id', '')); break
-" 2>/dev/null)
-fi
-
-if [[ -z "$TEMP_RUNNER_APP_ID" ]]; then
-    err "Could not determine temporary runner app_id."
-    exit 1
-fi
-info "Temporary runner deployed: app_id=$TEMP_RUNNER_APP_ID"
-
-# Get compose_hash
-echo "Getting compose_hash from Phala API..."
-
-COMPOSE_HASH=$(phala cvms get "$TEMP_RUNNER_APP_ID" --json --api-key "$PHALA_API_KEY" 2>/dev/null \
-    | python3 -c "
-import sys, json
-try:
-    data = json.load(sys.stdin)
-    print(data.get('compose_hash', ''))
-except Exception:
-    pass
-" 2>/dev/null) || COMPOSE_HASH=""
-
-if [[ -z "$COMPOSE_HASH" ]]; then
-    COMPOSE_HASH=$(phala cvms list --json --api-key "$PHALA_API_KEY" 2>/dev/null \
-        | python3 -c "
-import sys, json
-try:
-    data = json.load(sys.stdin)
-    cvms = data.get('items', data) if isinstance(data, dict) else data
-    for c in cvms:
-        app_id = c.get('appId') or c.get('app_id', '')
-        if app_id == '$TEMP_RUNNER_APP_ID':
-            print(c.get('compose_hash') or c.get('composeHash', '')); break
-except Exception:
-    pass
-" 2>/dev/null) || COMPOSE_HASH=""
-fi
-
-if [[ -n "$COMPOSE_HASH" ]]; then
-    info "Runner compose_hash: $COMPOSE_HASH"
-else
-    err "Could not get compose_hash. You must set APPROVED_COMPOSE_HASH manually later."
-fi
-
-# Delete temporary runner
-echo "Deleting temporary runner..."
-phala cvms delete "$TEMP_RUNNER_APP_ID" --api-key "$PHALA_API_KEY" 2>&1 || {
-    warn "Could not delete temporary runner $TEMP_RUNNER_APP_ID. Delete it manually:"
-    echo "  phala cvms delete $TEMP_RUNNER_APP_ID"
-}
-info "Temporary runner deleted"
-
-# ── Phase 7: Configure attestation ───────────────────────────
-
-phase "Phase 7: Configure attestation (APPROVED_COMPOSE_HASH)"
-
-if [[ -z "$COMPOSE_HASH" ]]; then
-    err "No compose_hash available. Skipping attestation configuration."
-    echo "  You must set it manually later."
-else
-    echo "Upgrading registry CVM with APPROVED_COMPOSE_HASH..."
-    # Note: --wait is omitted because the Phala CLI has a UUID validation bug
-    # when polling upgrade status. We poll the health endpoint manually instead.
-    phala deploy \
-        --cvm-id "$REGISTRY_APP_ID" \
-        --compose "$PHALA_ROOT/spawntee/docker-compose.phala.debug.yml" \
-        -e "AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID" \
-        -e "AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY" \
-        -e "AWS_REGION=$AWS_REGION" \
-        -e "GATEWAY_AUTH_COORDINATOR_WALLET=$GATEWAY_AUTH_COORDINATOR_WALLET" \
-        -e "APPROVED_COMPOSE_HASH=$COMPOSE_HASH" \
-        --api-key "$PHALA_API_KEY" \
-        2>&1 || {
-        err "Failed to upgrade registry with APPROVED_COMPOSE_HASH"
-        echo "  Do it manually:"
-        echo "  phala deploy --cvm-id $REGISTRY_APP_ID -e APPROVED_COMPOSE_HASH=$COMPOSE_HASH ..."
-    }
-
-    # Wait for registry to come back
-    echo "Waiting for registry to restart..."
-    sleep 15
-    UPGRADE_HEALTHY=false
-    for i in $(seq 1 20); do
-        if curl -sf "$REGISTRY_URL/health" >/dev/null 2>&1; then
-            UPGRADE_HEALTHY=true
-            info "Registry is back up with APPROVED_COMPOSE_HASH set"
-            break
-        fi
-        echo "  attempt $i/20..."
-        sleep 10
-    done
-    if [[ "$UPGRADE_HEALTHY" != true ]]; then
-        warn "Registry did not become healthy after upgrade. Check manually: $REGISTRY_URL/health"
-    fi
-fi
-
-# ── Phase 8: Write orchestrator .env ──────────────────────────
-
-phase "Phase 8: Write orchestrator .env"
+phase "Phase 6: Write orchestrator .env"
 
 ORCH_ENV="$ORCH_ROOT/.env"
 if [[ -f "$ORCH_ENV" ]]; then
@@ -611,9 +467,9 @@ GATEWAY_AUTH_COORDINATOR_WALLET=$GATEWAY_AUTH_COORDINATOR_WALLET
 EOF
 info "Wrote orchestrator .env"
 
-# ── Phase 9: Verify & summary ────────────────────────────────
+# ── Phase 7: Verify & summary ────────────────────────────────
 
-phase "Phase 9: Verify"
+phase "Phase 7: Verify"
 
 echo "Testing registry endpoints..."
 
@@ -675,7 +531,6 @@ ${BOLD}Registry CVM:${NC}
   App ID:        $REGISTRY_APP_ID
   URL:           $REGISTRY_URL
   Mode:          registry+runner (serves keys, runs models)
-  Compose hash:  ${COMPOSE_HASH:-UNKNOWN} (approved for future runners)
 
 ${BOLD}Authentication:${NC}
   GATEWAY_CERT_DIR:             $GATEWAY_CERT_DIR
@@ -696,9 +551,9 @@ ${BOLD}Orchestrator config:${NC}
 ${BOLD}How it works:${NC}
   The registry CVM handles everything initially (keys + model execution).
   When it runs out of capacity, the orchestrator auto-provisions runner
-  CVMs using the approved compose_hash for attestation.
+  CVMs and registers their compose hashes on the registry automatically.
 
 ${BOLD}Next steps:${NC}
-  1. Start the orchestrator:  cd $ORCH_ROOT && export \$(cat .env | xargs) && poetry run model-orchestrator
+  1. Start the orchestrator:  cd $ORCH_ROOT && export \$(cat .env | xargs) && model-orchestrator
   2. The orchestrator will discover the registry CVM by name prefix "$CLUSTER_NAME"
 EOF

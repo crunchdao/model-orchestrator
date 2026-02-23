@@ -1,29 +1,15 @@
-# TEE Cluster Initialization (current)
+# TEE Cluster Initialization
 
 ## Overview
 
-The Phala TEE setup now works as a **registry-first cluster**:
+The Phala TEE setup works as a **registry-first cluster**:
 
 - Start with **one registry CVM** (`registry+runner` mode).
 - The orchestrator discovers CVMs by `cluster-name` prefix.
 - When capacity is exhausted, the orchestrator auto-provisions runner CVMs (`runner` mode).
-- Runner attestation hashes are approved dynamically by the orchestrator via:
-  - `POST /registry/approve-hash`
+- Runner attestation hashes are approved on the registry dynamically by the orchestrator via `POST /registry/approve-hash`.
 
-> ✅ Important: the old manual `APPROVED_COMPOSE_HASH` bootstrap flow is no longer the primary path for current spawntee versions.
-
----
-
-## What changed vs the old doc
-
-The previous version of this doc described a required temporary-runner flow:
-
-1. Deploy temp runner
-2. Read `compose_hash`
-3. Delete temp runner
-4. Re-deploy registry with `APPROVED_COMPOSE_HASH`
-
-That flow is now legacy. Current orchestrator code pushes runner hashes to the registry automatically after discovery/provisioning.
+No manual compose-hash bootstrapping is needed — the orchestrator reads each runner's `compose_hash` from the Phala API and pushes it to the registry automatically.
 
 ---
 
@@ -31,7 +17,7 @@ That flow is now legacy. Current orchestrator code pushes runner hashes to the r
 
 ### Required repos/layout
 
-This repo expects `cruncher_phala` as a sibling when using the setup script:
+This repo expects `cruncher_phala` as a sibling:
 
 ```text
 some-parent/
@@ -57,7 +43,7 @@ some-parent/
 
 ---
 
-## Recommended setup path
+## Setup script
 
 Use:
 
@@ -65,32 +51,21 @@ Use:
 scripts/setup_phala_cluster.sh
 ```
 
-The script currently:
+The script:
 
 1. Validates environment and required code changes
 2. Collects credentials and cluster settings
 3. Writes secret/env files
 4. Optionally builds/pushes spawntee image
 5. Deploys (or reuses) registry CVM
-6. Performs compose-hash attestation setup
-7. Writes orchestrator `.env`
-8. Verifies health and auth behavior
-
-> Note: the script still contains a compatibility step that can set `APPROVED_COMPOSE_HASH`. This is safe, but for current spawntee/orchestrator behavior hash approval is also handled dynamically at runtime.
+6. Writes orchestrator `.env`
+7. Verifies health and auth behavior
 
 ---
 
-## Minimal manual bootstrap (current runtime model)
-
-If you do this manually, the minimum needed state is:
-
-1. Deploy a registry CVM
-2. Configure orchestrator with Phala runner + gateway certs
-3. Start orchestrator
+## Manual bootstrap
 
 ### 1) Deploy registry CVM
-
-Use the compose from `cruncher_phala` (current path used by setup script):
 
 ```bash
 phala deploy \
@@ -107,7 +82,7 @@ phala deploy \
 
 ### 2) Configure orchestrator
 
-Set env vars (for runtime + autoscaling):
+Set env vars:
 
 ```bash
 export PHALA_API_KEY=...
@@ -115,7 +90,7 @@ export GATEWAY_CERT_DIR=/path/to/coordinator/certs
 export GATEWAY_AUTH_COORDINATOR_WALLET=...
 ```
 
-Use Phala runner config (kebab-case in YAML):
+Phala runner config (YAML):
 
 ```yaml
 infrastructure:
@@ -125,44 +100,64 @@ infrastructure:
     phala-api-url: "https://cloud-api.phala.network"
     runner-compose-path: "../cruncher_phala/spawntee/docker-compose.phala.runner.yml"
     spawntee-port: 9010
-    request-timeout: 60
+    request-timeout: 30
     instance-type: "tdx.medium"
     max-models: 0
+    memory-per-model-mb: 1024
     gateway-cert-dir: "/path/to/coordinator/certs"
 ```
 
 ### 3) Start orchestrator
 
 ```bash
-poetry run model-orchestrator
+model-orchestrator
 ```
+
+The orchestrator handles runner provisioning and compose-hash registration automatically from here.
 
 ---
 
-## Runtime behavior (current)
+## Runtime behavior
 
 At startup, `PhalaCluster`:
 
 1. Discovers CVMs by `cluster-name` prefix from Phala API
-2. Probes each CVM for mode/health
-3. Picks head CVM based on `/capacity`
+2. Probes each CVM for mode/health (`GET /`)
+3. Picks head CVM based on `/capacity` (`accepting_new_models`)
 4. Rebuilds task routing map from `/running_models`
-5. Pushes discovered runner compose hashes to registry via `/registry/approve-hash`
+5. Reads runner compose hashes from Phala API and pushes them to registry via `POST /registry/approve-hash`
 
 During operation:
 
-- Before each build, orchestrator asks head CVM `/capacity`
-- If full, it provisions a new runner with `phala deploy`
-- Waits for runner readiness (`/` then `/capacity`)
-- Approves runner hash on registry
+- Before each build, orchestrator asks head CVM `GET /capacity`
+- If full, it checks other CVMs for capacity, then provisions a new runner with `phala deploy` if none have space
+- New runners are deployed with `REGISTRY_URL`, `CAPACITY_THRESHOLD`, `MODEL_MEMORY_LIMIT_MB`, and `GATEWAY_AUTH_COORDINATOR_WALLET` env vars
+- Waits for runner readiness (`GET /` then `GET /capacity`)
+- Reads the new runner's compose hash from the Phala API and approves it on the registry via `POST /registry/approve-hash`
 - Promotes new runner as head
 
 ---
 
-## Notes / caveats
+## Config reference
 
-- `runner-compose-path` is required for autoscaling.
-- `phala` CLI must be available on the orchestrator host for provisioning.
-- `PHALA_API_KEY` is read from environment (not YAML field).
-- `memory-per-model-mb` and `provision-factor` are still accepted in config for backward compatibility but currently ignored by `PhalaCluster` capacity decisions.
-- If you run older spawntee that does not support `/registry/approve-hash`, you may need the legacy `APPROVED_COMPOSE_HASH` flow.
+| YAML field | Default | Description |
+|---|---|---|
+| `cluster-name` | `""` | Name prefix for CVM discovery |
+| `phala-api-url` | `https://cloud-api.phala.network` | Phala Cloud API base URL |
+| `runner-compose-path` | `""` | Path to runner docker-compose for auto-provisioning |
+| `spawntee-port` | `9010` | Port where spawntee API listens |
+| `request-timeout` | `30` | HTTP timeout for spawntee API calls (seconds) |
+| `instance-type` | `tdx.medium` | Phala CVM instance type for new runners |
+| `max-models` | `0` | Global cap on total models (0 = unlimited) |
+| `memory-per-model-mb` | `1024` | Memory per model in MB. Passed as `MODEL_MEMORY_LIMIT_MB` to provisioned runners for capacity planning and container memory limits. |
+| `provision-factor` | `0.8` | Accepted for backward compatibility, not used at runtime |
+| `gateway-cert-dir` | `null` | Path to coordinator cert dir (key.pem or tls.key). Also settable via `GATEWAY_CERT_DIR` env var. |
+
+Environment variables (not in YAML):
+
+| Variable | Description |
+|---|---|
+| `PHALA_API_KEY` | Phala Cloud API key |
+| `GATEWAY_CERT_DIR` | Fallback for `gateway-cert-dir` YAML field |
+| `GATEWAY_AUTH_COORDINATOR_WALLET` | Coordinator wallet for spawntee gateway auth |
+| `CAPACITY_THRESHOLD` | Passed to provisioned runners (default `0.8`) |
