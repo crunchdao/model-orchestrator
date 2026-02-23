@@ -70,11 +70,14 @@ class PhalaModelRunner(Runner):
         # Route to the CVM that owns this task
         client = self._cluster.client_for_task(task_id)
 
-        # Extract resource limits from crunch config (same source as AWS ECS)
-        memory_mb = None
+        # Resource limits: use the cluster's per-model memory budget (from
+        # orchestrator config memory-per-model-mb).  Fall back to cpu_config
+        # if the crunch has one (AWS ECS compat), but the cluster value is
+        # the canonical source for Phala deployments.
+        memory_mb = self._cluster.memory_per_model_mb
         cpu_vcpus = None
         if crunch.infrastructure and crunch.infrastructure.cpu_config:
-            memory_mb = crunch.infrastructure.cpu_config.memory
+            memory_mb = crunch.infrastructure.cpu_config.memory or memory_mb
             cpu_vcpus = crunch.infrastructure.cpu_config.vcpus
 
         logger.info(
