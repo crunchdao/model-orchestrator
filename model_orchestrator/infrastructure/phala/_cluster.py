@@ -99,6 +99,7 @@ class PhalaCluster:
         max_models: int = 0,
         memory_per_model_mb: int = 256,
         capacity_threshold: float = 0.8,
+        get_active_model_count: callable = None,
     ):
         """
         Args:
@@ -140,6 +141,7 @@ class PhalaCluster:
         self.max_models = max_models  # 0 = unlimited
         self.memory_per_model_mb = memory_per_model_mb
         self.capacity_threshold = capacity_threshold
+        self._get_active_model_count = get_active_model_count
 
         if instance_type not in INSTANCE_TYPE_MEMORY_MB:
             raise PhalaClusterError(
@@ -400,34 +402,26 @@ class PhalaCluster:
     def _rebuild_task_map_unlocked(self):
         """Scan all CVMs for persisted tasks and rebuild the task → CVM mapping.
 
-        Only includes tasks that represent live models:
-        - pending/running: build or start in progress
-        - completed with current_operation=start_model: container is running
+        This map is used for routing (which CVM owns a task) — not for counting
+        active models.  The global model cap uses the orchestrator's ModelRunsCluster
+        (via get_active_model_count callback) which is the authoritative source.
 
-        Completed builds (build_model:completed) without a subsequent start
-        are just routing info — they don't consume a model slot.  Failed and
-        stopped tasks are excluded entirely.
+        Only includes tasks that are not terminal (failed/stopped are excluded
+        since their routing is no longer relevant).
         """
+        _ROUTABLE_STATUSES = {"pending", "running", "completed"}
         self.task_client_map.clear()
         for app_id, cvm in self.cvms.items():
             tasks = cvm.client.get_tasks()
-            live = 0
+            routable = 0
             for task in tasks:
                 task_id = task.get("task_id")
                 status = task.get("status")
-                current_op = task.get("current_operation")
-                if not task_id:
-                    continue
-                # In-progress operations count as live
-                if status in ("pending", "running"):
+                if task_id and status in _ROUTABLE_STATUSES:
                     self.task_client_map[task_id] = app_id
-                    live += 1
-                # Completed start_model = running container
-                elif status == "completed" and current_op == "start_model":
-                    self.task_client_map[task_id] = app_id
-                    live += 1
-            logger.info("  📋 %s: %d live / %d total persisted task(s)",
-                        cvm.name, live, len(tasks))
+                    routable += 1
+            logger.info("  📋 %s: %d routable / %d total persisted task(s)",
+                        cvm.name, routable, len(tasks))
 
         logger.info("✅ Task map rebuilt: %d task(s) across %d CVM(s)",
                      len(self.task_client_map), len(self.cvms))
@@ -477,7 +471,13 @@ class PhalaCluster:
     # ─── Capacity management ───
 
     def total_running_models(self) -> int:
-        """Count models across all CVMs based on the task routing map."""
+        """Count active models across the cluster.
+
+        Uses the orchestrator's model cluster (the authoritative source)
+        when available.  Falls back to the task routing map size.
+        """
+        if self._get_active_model_count:
+            return self._get_active_model_count()
         with self._lock:
             return len(self.task_client_map)
 
@@ -510,16 +510,16 @@ class PhalaCluster:
             if not self.head_id:
                 raise PhalaClusterError("No head CVM available")
 
-            # 1. Global cap
-            total = len(self.task_client_map)
-            if self.max_models and total >= self.max_models:
-                raise PhalaClusterError(
-                    f"Global model cap reached ({total}/{self.max_models}). "
-                    f"Cannot accept new models."
-                )
-
             head = self.cvms[self.head_id]
             head_id_snapshot = self.head_id
+
+        # 1. Global cap — count active models from orchestrator (authoritative)
+        total = self.total_running_models()
+        if self.max_models and total >= self.max_models:
+            raise PhalaClusterError(
+                f"Global model cap reached ({total}/{self.max_models}). "
+                f"Cannot accept new models."
+            )
 
         # ── Phase 2: ask the CVM (network call, no lock) ────────────
         accepting = head.client.has_capacity()

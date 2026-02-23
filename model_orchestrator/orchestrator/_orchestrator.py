@@ -86,6 +86,13 @@ class Orchestrator:
                 from ..infrastructure.phala._cluster import PhalaCluster
 
                 # Initialize cluster: discovers CVMs from Phala API
+                def _get_active_model_count():
+                    """Count models actively using CVM resources (building, starting, or running)."""
+                    if not hasattr(self, 'models_run_service'):
+                        return 0  # Not initialized yet (during startup)
+                    cluster = self.models_run_service.cluster
+                    return len(cluster.get_models_in_build_phase()) + len(cluster.get_models_in_run_phase())
+
                 cluster = PhalaCluster(
                     cluster_name=runner_config.cluster_name,
                     spawntee_port=runner_config.spawntee_port,
@@ -97,6 +104,7 @@ class Orchestrator:
                     capacity_threshold=runner_config.capacity_threshold,
                     max_models=runner_config.max_models,
                     gateway_key_path=runner_config.gateway_key_path,
+                    get_active_model_count=_get_active_model_count,
                 )
                 cluster.discover()
                 cluster.rebuild_task_map()
