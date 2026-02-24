@@ -64,6 +64,8 @@ class PhalaRunnerInfrastructureConfig(_BaseConfig):
     gateway_key_path: str = Field(..., description="Path to the coordinator RSA private key file (PEM) for gateway auth signing.")
     vpc_enabled: bool = Field(False, description="Enable VPC Access Control (VPCAC). When true, runners are pinned to the registry's teepod, deployed with a dstack-service VPN sidecar (set runner_compose_path to the .vpc.yml variant), and the VPC server allowlist is updated on each provision.")
     vpc_server_cvm_id: str = Field("", description="app_id of the VPC server CVM (Headscale control plane). Required when vpc_enabled=true.")
+    vpc_server_compose_path: str = Field("", description="Path to docker-compose.phala.vpc-server.yml. Required when vpc_enabled=true. Always passed as --compose to 'phala cvms upgrade' when updating VPC_ALLOWED_APPS, eliminating ambiguity about whether the CLI accepts bare -e flags without a compose file.")
+    vpc_registry_node_name: str = Field("", description="The VPC_NODE_NAME value set in the registry's docker-compose.phala.registry.vpc.yml. Determines the dstack-internal hostname used by runners: http://{vpc_registry_node_name}.dstack.internal:{port}. Defaults to '{cluster_name}-registry' when empty. Must match VPC_NODE_NAME in the registry compose file exactly — if the compose file is edited independently, update this field to match.")
 
 
 RunnerInfrastructureConfig = Union[AwsRunnerInfrastructureConfig, LocalRunnerInfrastructureConfig, PhalaRunnerInfrastructureConfig]

@@ -478,12 +478,13 @@ class TestEnsureCapacity:
 class TestUpdateVPCAllowedApps:
     """Test _update_vpc_allowed_apps() — builds VPC_ALLOWED_APPS and shells out correctly."""
 
-    def _make_cluster(self, vpc_server_cvm_id="vpc-server-app-id"):
+    def _make_cluster(self, vpc_server_cvm_id="vpc-server-app-id", vpc_server_compose_path="/path/to/vpc-server.yml"):
         cluster = PhalaCluster(
             cluster_name="bird-tracker",
             phala_api_url="https://mock-api",
             vpc_enabled=True,
             vpc_server_cvm_id=vpc_server_cvm_id,
+            vpc_server_compose_path=vpc_server_compose_path,
         )
         cluster.phala_api_key = "test-key"
         return cluster
@@ -514,6 +515,11 @@ class TestUpdateVPCAllowedApps:
         assert call_args[2] == "upgrade"
         assert call_args[3] == "vpc-server-app-id"
 
+        # --compose must always be present (bare -e without --compose is unverified)
+        assert "--compose" in call_args
+        compose_idx = call_args.index("--compose")
+        assert call_args[compose_idx + 1] == "/path/to/vpc-server.yml"
+
         # Find the VPC_ALLOWED_APPS value in the cmd
         vpc_apps_value = None
         for i, arg in enumerate(call_args):
@@ -524,6 +530,18 @@ class TestUpdateVPCAllowedApps:
         assert vpc_apps_value is not None, "VPC_ALLOWED_APPS not found in command"
         allowed = set(vpc_apps_value.split(","))
         assert allowed == {"reg-app-id", "runner-1-id", "runner-2-id"}
+
+    def test_raises_when_vpc_server_compose_path_not_set(self):
+        """Raises PhalaClusterError when vpc_server_compose_path is empty."""
+        cluster = self._make_cluster(vpc_server_compose_path="")
+
+        client_reg = MagicMock(spec=SpawnteeClient)
+        cluster.cvms = {
+            "reg-app-id": CVMInfo("reg-app-id", "bird-tracker-registry", client_reg, mode="registry+runner"),
+        }
+
+        with pytest.raises(PhalaClusterError, match="vpc_server_compose_path is not configured"):
+            cluster._update_vpc_allowed_apps()
 
     def test_raises_when_vpc_server_cvm_id_not_set(self):
         """Raises PhalaClusterError when vpc_server_cvm_id is empty."""

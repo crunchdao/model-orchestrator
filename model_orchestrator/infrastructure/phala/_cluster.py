@@ -103,6 +103,8 @@ class PhalaCluster:
         get_active_model_count: callable = None,
         vpc_enabled: bool = False,
         vpc_server_cvm_id: str = "",
+        vpc_server_compose_path: str = "",
+        vpc_registry_node_name: str = "",
     ):
         """
         Args:
@@ -129,6 +131,15 @@ class PhalaCluster:
             vpc_server_cvm_id: app_id of the VPC server CVM (Headscale control plane).
                 Required when vpc_enabled=True. The orchestrator shells out to
                 `phala cvms upgrade {vpc_server_cvm_id}` to update VPC_ALLOWED_APPS.
+            vpc_server_compose_path: Path to the VPC server docker-compose file
+                (docker-compose.phala.vpc-server.yml). Required when vpc_enabled=True.
+                Always passed as `--compose` to `phala cvms upgrade` — this eliminates
+                ambiguity about whether the CLI accepts bare -e flags without a compose.
+            vpc_registry_node_name: The VPC_NODE_NAME set in the registry's compose file.
+                Determines the dstack-internal hostname runners use to reach the registry:
+                `http://{vpc_registry_node_name}.dstack.internal:{port}`.
+                Defaults to `{cluster_name}-registry` when empty.
+                Must match VPC_NODE_NAME in docker-compose.phala.registry.vpc.yml exactly.
         """
         self.cluster_name = cluster_name
         self.spawntee_port = spawntee_port
@@ -138,6 +149,11 @@ class PhalaCluster:
         self.runner_compose_path = runner_compose_path
         self.vpc_enabled = vpc_enabled
         self.vpc_server_cvm_id = vpc_server_cvm_id
+        self.vpc_server_compose_path = vpc_server_compose_path
+        # Default to "{cluster_name}-registry" — must match VPC_NODE_NAME in
+        # docker-compose.phala.registry.vpc.yml. If the compose file is ever
+        # edited or the cluster renamed, update this config field to match.
+        self.vpc_registry_node_name = vpc_registry_node_name or f"{cluster_name}-registry"
 
         # Load coordinator gateway credentials for spawntee API auth.
         key_path = Path(gateway_key_path)
@@ -189,10 +205,7 @@ class PhalaCluster:
         # Task routing: task_id → app_id
         self.task_client_map: dict[str, str] = {}
 
-        # VPC server app_id — resolved during discover() when vpc_enabled=True.
-        # Set from vpc_server_cvm_id config; stored separately so provisioning
-        # code can reference it without re-scanning self.cvms each time.
-        self.vpc_server_app_id: str = vpc_server_cvm_id
+        # (vpc_server_cvm_id is the single authoritative attribute — no alias)
 
     # ─── Discovery ───
 
@@ -689,7 +702,9 @@ class PhalaCluster:
                     f"Registry CVM {registry_cvm.name} has no node_id — "
                     "cannot pin runner to same physical server (required for VPC)"
                 )
-            registry_url = f"http://{self.cluster_name}-registry.dstack.internal:{self.spawntee_port}"
+            # vpc_registry_node_name must match VPC_NODE_NAME in
+            # docker-compose.phala.registry.vpc.yml — see __init__ for details.
+            registry_url = f"http://{self.vpc_registry_node_name}.dstack.internal:{self.spawntee_port}"
         else:
             # Non-VPC mode: use the public Phala gateway URL.
             if not registry_cvm.node_name:
@@ -720,7 +735,7 @@ class PhalaCluster:
             cmd.extend(["--node-id", str(registry_cvm.node_id)])
             # VPC identity: used by dstack-service sidecar to register with Headscale.
             cmd.extend(["-e", f"VPC_NODE_NAME={cvm_name}"])
-            cmd.extend(["-e", f"VPC_SERVER_APP_ID={self.vpc_server_app_id}"])
+            cmd.extend(["-e", f"VPC_SERVER_APP_ID={self.vpc_server_cvm_id}"])
 
         if coordinator_wallet:
             cmd.extend(["-e", f"GATEWAY_AUTH_COORDINATOR_WALLET={coordinator_wallet}"])
@@ -891,6 +906,13 @@ class PhalaCluster:
                 "Cannot update VPC_ALLOWED_APPS: vpc_server_cvm_id is not configured"
             )
 
+        if not self.vpc_server_compose_path:
+            raise PhalaClusterError(
+                "Cannot update VPC_ALLOWED_APPS: vpc_server_compose_path is not configured. "
+                "phala cvms upgrade requires --compose to reliably apply env vars; "
+                "set vpc_server_compose_path to docker-compose.phala.vpc-server.yml"
+            )
+
         with self._lock:
             registry = next((c for c in self.cvms.values() if "registry" in c.mode), None)
             runner_ids = [app_id for app_id, c in self.cvms.items() if c.mode == "runner"]
@@ -911,6 +933,7 @@ class PhalaCluster:
 
         cmd = [
             "phala", "cvms", "upgrade", self.vpc_server_cvm_id,
+            "--compose", self.vpc_server_compose_path,
             "-e", f"VPC_ALLOWED_APPS={vpc_allowed_apps}",
         ]
 
