@@ -163,7 +163,11 @@ class PhalaModelBuilder(Builder):
         for model in models:
             task_id = model.builder_job_id
             if not task_id:
-                result[model] = ModelRun.BuilderStatus.FAILED
+                logger.error(
+                    "ModelRun %s has no builder_job_id — skipping status update. "
+                    "This is a data integrity issue; the task was never submitted or the id was not persisted.",
+                    model.id,
+                )
                 continue
 
             client = self._cluster.client_for_task(task_id)
