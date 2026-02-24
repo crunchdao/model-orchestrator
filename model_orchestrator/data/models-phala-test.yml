@@ -1,0 +1,13 @@
+models:
+  - id: "1"
+    name: "ewma_var"
+    submission_id: "30001"
+    crunch_id: bird_tracker
+    cruncher_id: "test-cruncher"
+    desired_state: "RUNNING"
+  - id: "2"
+    name: "quantile_regression_river"
+    submission_id: "30002"
+    crunch_id: bird_tracker
+    cruncher_id: "test-cruncher"
+    desired_state: "RUNNING"

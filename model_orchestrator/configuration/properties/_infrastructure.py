@@ -50,7 +50,21 @@ class LocalRunnerInfrastructureConfig(_BaseConfig):
         return self.resource_storage_path_format.format(id=resource_id)
 
 
-RunnerInfrastructureConfig = Union[AwsRunnerInfrastructureConfig, LocalRunnerInfrastructureConfig]
+class PhalaRunnerInfrastructureConfig(_BaseConfig):
+    type: Literal["phala"] = "phala"
+    spawntee_port: int = Field(9010, description="Port where the spawntee API is exposed on the CVM")
+    request_timeout: int = Field(30, description="HTTP request timeout in seconds for spawntee API calls")
+    cluster_name: str = Field("", description="Name prefix for CVM discovery via Phala Cloud API (e.g. 'bird-tracker')")
+    phala_api_url: str = Field("https://cloud-api.phala.network", description="Phala Cloud API base URL")
+    runner_compose_path: str = Field("", description="Path to docker-compose.phala.runner.yml for auto-provisioning new runner CVMs")
+    instance_type: str = Field("tdx.medium", description="Phala CVM instance type for auto-provisioned runners (e.g. tdx.small, tdx.medium, tdx.large)")
+    memory_per_model_mb: int = Field(1024, description="Estimated memory per model container in MB. Used to calculate max models per CVM.")
+    capacity_threshold: float = Field(0.8, description="Fraction of CVM capacity at which it reports full (0.0-1.0). Passed as CAPACITY_THRESHOLD to provisioned runner CVMs.")
+    max_models: int = Field(0, description="Global maximum number of models across the entire cluster. 0 = unlimited.")
+    gateway_key_path: str = Field(..., description="Path to the coordinator RSA private key file (PEM) for gateway auth signing.")
+
+
+RunnerInfrastructureConfig = Union[AwsRunnerInfrastructureConfig, LocalRunnerInfrastructureConfig, PhalaRunnerInfrastructureConfig]
 
 
 class RabbitMQPublisherInfrastructureConfig(_BaseConfig):

@@ -1,0 +1,38 @@
+logging:
+  level: debug
+
+infrastructure:
+  database:
+    type: sqlite
+    path: "model_orchestrator/data/orchestrator-phala-test.db"
+
+  publishers:
+    - type: websocket
+      address: "0.0.0.0"
+      port: 9091
+
+  runner:
+    type: phala
+    cluster-name: "bird-tracker"
+    phala-api-url: "https://cloud-api.phala.network"
+    registry-compose-path: "model_orchestrator/data/docker-compose.phala.registry.yml"
+    runner-compose-path: "model_orchestrator/data/docker-compose.phala.runner.yml"
+    spawntee-port: 9010
+    request-timeout: 60
+    instance-type: "tdx.medium"      # 2 vCPU, 4 GB RAM — for auto-provisioned runners
+    memory-per-model-mb: 1024        # 1 GB per model container
+    capacity-threshold: 0.8          # CVM reports full at 80% capacity
+    max-models: 20                   # global cap across the entire cluster
+    # gateway-key-path: "/path/to/coordinator/key.pem"
+
+watcher:
+  interval: 10
+  poller:
+    type: yaml
+    path: "model_orchestrator/data/models-phala-test.yml"
+
+crunches:
+  - id: "bird_tracker"
+    name: "bird tracker"
+    infrastructure:
+      zone: "phala"

@@ -79,6 +79,39 @@ class Orchestrator:
                 model_runner = LocalModelRunner(
                     docker_network_name=runner_config.docker_network_name
                 )
+            elif runner_config.type == "phala":
+                logger.info("Configuring Phala TEE builder and runner...")
+
+                from ..infrastructure.phala import PhalaModelBuilder, PhalaModelRunner
+                from ..infrastructure.phala._cluster import PhalaCluster
+
+                # Initialize cluster: discovers CVMs from Phala API
+                def _get_active_model_count():
+                    """Count models actively using CVM resources (building, starting, or running)."""
+                    if not hasattr(self, 'models_run_service'):
+                        return 0  # Not initialized yet (during startup)
+                    cluster = self.models_run_service.cluster
+                    return len(cluster.get_models_in_build_phase()) + len(cluster.get_models_in_run_phase())
+
+                cluster = PhalaCluster(
+                    cluster_name=runner_config.cluster_name,
+                    spawntee_port=runner_config.spawntee_port,
+                    request_timeout=runner_config.request_timeout,
+                    phala_api_url=runner_config.phala_api_url,
+                    runner_compose_path=runner_config.runner_compose_path,
+                    instance_type=runner_config.instance_type,
+                    memory_per_model_mb=runner_config.memory_per_model_mb,
+                    capacity_threshold=runner_config.capacity_threshold,
+                    max_models=runner_config.max_models,
+                    gateway_key_path=runner_config.gateway_key_path,
+                    get_active_model_count=_get_active_model_count,
+                )
+                cluster.discover()
+                cluster.rebuild_task_map()
+                self.phala_cluster = cluster
+
+                model_builder = PhalaModelBuilder(cluster)
+                model_runner = PhalaModelRunner(cluster)
             else:
                 raise ValueError(f"Unknown runner type: {runner_config.type}")
 
@@ -207,22 +240,31 @@ class Orchestrator:
             )
             self._backgrounds.append(schedule_poller.start_polling)
 
+        # ── HTTP API for model management ──
         if True:
-            if configuration.infrastructure.runner.type == "local":
-                from ..infrastructure.http import create_local_deploy_api, LocalDeployServices
+            runner_type = configuration.infrastructure.runner.type
+            if runner_type in ("local", "phala"):
                 import uvicorn
 
                 port = 8001
                 host = "0.0.0.0"
-                logger.info(f"Start HTTP server for local deployment over {host}:{port}")
 
-                # for the local convenience, we start FastAPI to let interaction over HTTP
-                local_deploy_services = LocalDeployServices(
-                    model_state_mediator=self.model_state_mediator,
-                    app_config=configuration,
-                    model_state_config=self.model_config_poller
-                )
-                local_deploy_api = create_local_deploy_api(local_deploy_services)
+                if runner_type == "local":
+                    from ..infrastructure.http import create_local_deploy_api, LocalDeployServices
+                    deploy_services = LocalDeployServices(
+                        model_state_mediator=self.model_state_mediator,
+                        app_config=configuration,
+                        model_state_config=self.model_config_poller,
+                    )
+                    deploy_api = create_local_deploy_api(deploy_services)
+                elif runner_type == "phala":
+                    from ..infrastructure.http import create_phala_deploy_api, PhalaDeployServices
+                    deploy_services = PhalaDeployServices(
+                        model_state_mediator=self.model_state_mediator,
+                    )
+                    deploy_api = create_phala_deploy_api(deploy_services)
+
+                logger.info(f"Start HTTP server for model management over {host}:{port} (mode={runner_type})")
 
                 def make_uvicorn_runner(app, host, port):
                     config = uvicorn.Config(app, host=host, port=port, log_config=None, access_log=True)
@@ -234,11 +276,10 @@ class Orchestrator:
                     def uvicorn_stop():
                         if not server.should_exit:
                             server.should_exit = True
-                            #server.force_exit = True  # optional, fast
 
                     return uvicorn_run, uvicorn_stop
 
-                uvicorn_run, uvicorn_stop = make_uvicorn_runner(local_deploy_api, host, port)
+                uvicorn_run, uvicorn_stop = make_uvicorn_runner(deploy_api, host, port)
                 attach_uvicorn_to_my_logger()
                 self._backgrounds.append(uvicorn_run)
                 self._finishers.append(uvicorn_stop)
