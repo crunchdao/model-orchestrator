@@ -1,7 +1,7 @@
 import os
 
 from model_orchestrator.entities import ErrorType, CloudProviderErrorType, ModelRunnerErrorType, ModelRun, OrchestratorError, ModelRunsCluster
-from model_orchestrator.entities.errors import OrchestratorErrorType, NEW_RELIC_ALERT_FLAG
+from model_orchestrator.entities.errors import OrchestratorErrorType
 from model_orchestrator.entities.exceptions import OrchestratorErrors
 from model_orchestrator.entities.failure import Failure
 from model_orchestrator.repositories import ModelRunRepository
@@ -53,13 +53,13 @@ class _ErrorHandlingService:
             place_to_quarantine = False
         if is_cloud_provider_error:
             place_to_quarantine = False
-            get_logger().error(f"{NEW_RELIC_ALERT_FLAG} Something going wrong with cloud provider. ErrorType:[{ErrorType}], Reason:[{reason}]", exc_info=exception)
+            get_logger().error(f"Cloud provider error. ErrorType:[{error_code}], Reason:[{reason}]", exc_info=exception)
         elif error_code == ModelRunnerErrorType.CONNECTION_FAILED:
             place_to_quarantine = False
-            get_logger().error(f"{NEW_RELIC_ALERT_FLAG} Connection to model runner (GRPC) failed. ErrorType:[{ErrorType}], Reason:[{reason}]", exc_info=exception)
+            get_logger().error(f"Connection to model runner (GRPC) failed. ErrorType:[{error_code}], Reason:[{reason}]", exc_info=exception)
         elif error_code == OrchestratorErrorType.STOP_UNEXPECTED:
             place_to_quarantine = False
-            get_logger().error(f"{NEW_RELIC_ALERT_FLAG} Undesired stop of model {model_run.model_id}. ErrorType:[{ErrorType}], Reason:[{reason}]", exc_info=exception)
+            get_logger().error(f"Undesired stop of model {model_run.model_id}. ErrorType:[{error_code}], Reason:[{reason}]", exc_info=exception)
 
         model_run.record_failure(error_code, reason, exception, traceback)
         self.model_run_repository.save_model(model_run)
