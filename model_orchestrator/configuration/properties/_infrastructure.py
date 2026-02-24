@@ -56,12 +56,14 @@ class PhalaRunnerInfrastructureConfig(_BaseConfig):
     request_timeout: int = Field(30, description="HTTP request timeout in seconds for spawntee API calls")
     cluster_name: str = Field("", description="Name prefix for CVM discovery via Phala Cloud API (e.g. 'bird-tracker')")
     phala_api_url: str = Field("https://cloud-api.phala.network", description="Phala Cloud API base URL")
-    runner_compose_path: str = Field("", description="Path to docker-compose.phala.runner.yml for auto-provisioning new runner CVMs")
+    runner_compose_path: str = Field("", description="Path to the runner docker-compose file for auto-provisioning new runner CVMs. Use docker-compose.phala.runner.vpc.yml when vpc_enabled=true, or docker-compose.phala.runner.yml otherwise.")
     instance_type: str = Field("tdx.medium", description="Phala CVM instance type for auto-provisioned runners (e.g. tdx.small, tdx.medium, tdx.large)")
     memory_per_model_mb: int = Field(1024, description="Estimated memory per model container in MB. Used to calculate max models per CVM.")
     capacity_threshold: float = Field(0.8, description="Fraction of CVM capacity at which it reports full (0.0-1.0). Passed as CAPACITY_THRESHOLD to provisioned runner CVMs.")
     max_models: int = Field(0, description="Global maximum number of models across the entire cluster. 0 = unlimited.")
     gateway_key_path: str = Field(..., description="Path to the coordinator RSA private key file (PEM) for gateway auth signing.")
+    vpc_enabled: bool = Field(False, description="Enable VPC Access Control (VPCAC). When true, runners are pinned to the registry's teepod, deployed with a dstack-service VPN sidecar (set runner_compose_path to the .vpc.yml variant), and the VPC server allowlist is updated on each provision.")
+    vpc_server_cvm_id: str = Field("", description="app_id of the VPC server CVM (Headscale control plane). Required when vpc_enabled=true.")
 
 
 RunnerInfrastructureConfig = Union[AwsRunnerInfrastructureConfig, LocalRunnerInfrastructureConfig, PhalaRunnerInfrastructureConfig]
