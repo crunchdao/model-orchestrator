@@ -251,7 +251,11 @@ class TestTaskRouting:
             cluster.client_for_task("unknown-task")
 
     def test_rebuild_task_map(self):
-        """rebuild_task_map uses /tasks (persisted state) not /running_models."""
+        """rebuild_task_map uses /tasks (persisted state) not /running_models.
+
+        Only routable statuses (pending, running, completed) are included.
+        Terminal statuses (failed) are excluded since routing is no longer needed.
+        """
         cluster = PhalaCluster(cluster_name="")
 
         client1 = MagicMock(spec=SpawnteeClient)
@@ -273,8 +277,9 @@ class TestTaskRouting:
         cluster.rebuild_task_map()
 
         assert cluster.task_client_map["task-1"] == "cvm1"
-        assert cluster.task_client_map["task-2"] == "cvm1"
+        assert "task-2" not in cluster.task_client_map  # failed tasks are not routable
         assert cluster.task_client_map["task-3"] == "cvm2"
+        assert len(cluster.task_client_map) == 2
 
 
 class TestInitValidation:
