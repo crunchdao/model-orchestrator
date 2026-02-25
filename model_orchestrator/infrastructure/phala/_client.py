@@ -215,6 +215,14 @@ class SpawnteeClient:
         """GET / — health check (retries on transient errors)."""
         return self._request("GET", "/", max_retries=DEFAULT_MAX_RETRIES).json()
 
+    def probe_health(self, timeout: float = 10) -> dict:
+        """GET / — single-shot health probe with short timeout.
+
+        Used during CVM provisioning wait loops where the caller manages
+        retries and deadlines.  No internal retries; raises on any failure.
+        """
+        return self._request("GET", "/", max_retries=0, timeout=timeout).json()
+
     def get_keypair(self, submission_id: str) -> dict:
         """GET /keypair/{submission_id} — get public key for encryption."""
         return self._request("GET", f"/keypair/{submission_id}").json()
@@ -311,6 +319,14 @@ class SpawnteeClient:
         accepting_new_models, capacity_threshold, max_models, etc.
         """
         return self._request("GET", "/capacity", max_retries=DEFAULT_MAX_RETRIES).json()
+
+    def probe_capacity(self, timeout: float = 10) -> dict:
+        """GET /capacity — single-shot probe with short timeout.
+
+        Used during CVM provisioning wait loops where the caller manages
+        retries and deadlines.  No internal retries; raises on any failure.
+        """
+        return self._request("GET", "/capacity", max_retries=0, timeout=timeout).json()
 
     def has_capacity(self) -> bool:
         """

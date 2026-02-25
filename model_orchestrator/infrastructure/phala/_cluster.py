@@ -27,6 +27,7 @@ import logging
 import os
 from pathlib import Path
 import threading
+import time
 import uuid
 
 import requests
@@ -130,11 +131,11 @@ class PhalaCluster:
                 VPC server allowlist is updated after each provision.
             vpc_server_cvm_id: app_id of the VPC server CVM (Headscale control plane).
                 Required when vpc_enabled=True. The orchestrator shells out to
-                `phala cvms upgrade {vpc_server_cvm_id}` to update VPC_ALLOWED_APPS.
+                `phala deploy --cvm-id {vpc_server_cvm_id}` to update VPC_ALLOWED_APPS.
             vpc_server_compose_path: Path to the VPC server docker-compose file
                 (docker-compose.phala.vpc-server.yml). Required when vpc_enabled=True.
-                Always passed as `--compose` to `phala cvms upgrade` — this eliminates
-                ambiguity about whether the CLI accepts bare -e flags without a compose.
+                Always passed as `--compose` to `phala deploy --cvm-id` — the CLI
+                requires a compose file even for env-var-only updates.
             vpc_registry_node_name: The VPC_NODE_NAME set in the registry's compose file.
                 Determines the dstack-internal hostname runners use to reach the registry:
                 `http://{vpc_registry_node_name}.dstack.internal:{port}`.
@@ -230,10 +231,14 @@ class PhalaCluster:
             key=lambda c: (0 if c.mode == "runner" else 1),
         )
         for cvm in candidates:
-            if cvm.client.has_capacity():
-                self.head_id = cvm.app_id
-                logger.info("📍 Head CVM: %s (%s)", cvm.name, cvm.app_id)
-                break
+            try:
+                if self._wait_for_cvm_ready(cvm, timeout=300):
+                    if cvm.client.has_capacity():
+                        self.head_id = cvm.app_id
+                        logger.info("📍 Head CVM: %s (%s)", cvm.name, cvm.app_id)
+                        break
+            except Exception as e:
+                logger.warning("⚠️ Could not probe %s during discover (skipping): %s", cvm.name, e)
 
         if not self.head_id:
             # All CVMs report full (but reachable). Use the registry as head;
@@ -258,6 +263,52 @@ class PhalaCluster:
             self._approve_runner_hashes_on_registry()
         except (requests.RequestException, SpawnteeClientError, PhalaClusterError) as e:
             logger.warning("⚠️ Could not approve runner hashes during discover (will retry on provision): %s", e)
+
+    def _wait_for_cvm_ready(self, cvm, *, timeout: int = 300) -> bool:
+        """Wait for a CVM to become reachable and pass auth.
+
+        Freshly provisioned CVMs may take several minutes to fetch their
+        cert hashes from CPI (DNS can be unavailable right after boot).
+        This method retries on auth errors with exponential backoff up to
+        *timeout* seconds.
+
+        Returns True if the CVM became ready, False if it timed out.
+        """
+        deadline = time.monotonic() + timeout
+        backoff = 5
+        while True:
+            try:
+                cvm.client.probe_health(timeout=10)
+                return True
+            except SpawnteeAuthenticationError:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    logger.warning(
+                        "⏰ CVM %s still failing auth after %ds, giving up",
+                        cvm.name, timeout,
+                    )
+                    return False
+                logger.info(
+                    "⏳ CVM %s auth not ready yet, retrying in %ds (%.0fs remaining)...",
+                    cvm.name, backoff, remaining,
+                )
+                time.sleep(min(backoff, remaining))
+                backoff = min(backoff * 2, 30)
+            except SpawnteeClientError:
+                # Network error (not up yet) — also retry
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    logger.warning(
+                        "⏰ CVM %s still unreachable after %ds, giving up",
+                        cvm.name, timeout,
+                    )
+                    return False
+                logger.info(
+                    "⏳ CVM %s not reachable yet, retrying in %ds (%.0fs remaining)...",
+                    cvm.name, backoff, remaining,
+                )
+                time.sleep(min(backoff, remaining))
+                backoff = min(backoff * 2, 30)
 
     def _discover_from_api(self):
         """Query Phala Cloud API for CVMs matching our cluster name prefix.
@@ -458,7 +509,12 @@ class PhalaCluster:
         _ROUTABLE_STATUSES = {"pending", "running", "completed"}
         self.task_client_map.clear()
         for app_id, cvm in self.cvms.items():
-            tasks = cvm.client.get_tasks()
+            try:
+                self._wait_for_cvm_ready(cvm, timeout=300)
+                tasks = cvm.client.get_tasks()
+            except Exception as e:
+                logger.warning("  ⚠️ %s: skipping task rebuild — could not reach CVM: %s", cvm.name, e)
+                continue
             routable = 0
             for task in tasks:
                 task_id = task.get("task_id")
@@ -803,19 +859,25 @@ class PhalaCluster:
         #
         # Uses wall-clock time (not loop-count) because each HTTP request
         # can take 30+ seconds with internal retries and backoff.
-        max_wait = 180  # 3 minutes total for both stages
+        max_wait = 300  # 5 minutes total for both stages
         interval = 10
         deadline = time.monotonic() + max_wait
 
         # Stage 1: wait for healthy
+        # Use probe_health() — single-shot with 10s timeout — so each
+        # iteration takes at most ~20s (10s timeout + 10s sleep) and the
+        # outer deadline is respected.  health() has internal retries that
+        # can block for minutes and blow past the deadline.
         ready = False
         while time.monotonic() < deadline:
             try:
-                health = new_client.health()
+                health = new_client.probe_health(timeout=10)
                 if health.get("status") == "healthy":
                     elapsed = max_wait - (deadline - time.monotonic())
                     logger.info("  ✅ CVM %s is healthy (took %ds)", cvm_name, int(elapsed))
                     break
+            except SpawnteeAuthenticationError as e:
+                logger.debug("  ⏳ CVM %s auth not ready yet (cert hashes loading): %s", cvm_name, e)
             except SpawnteeClientError:
                 pass
             time.sleep(interval)
@@ -824,9 +886,12 @@ class PhalaCluster:
             return
 
         # Stage 2: wait for capacity (full readiness)
+        # Same approach: single-shot probes, let the outer loop manage retries.
+        # Auth errors are retried too — freshly provisioned CVMs need time to
+        # fetch cert hashes from CPI (DNS may be unavailable at boot).
         while time.monotonic() < deadline:
             try:
-                cap = new_client.capacity()
+                cap = new_client.probe_capacity(timeout=10)
                 if cap.get("accepting_new_models"):
                     elapsed = max_wait - (deadline - time.monotonic())
                     logger.info(
@@ -835,8 +900,8 @@ class PhalaCluster:
                     )
                     ready = True
                     break
-            except SpawnteeAuthenticationError:
-                raise
+            except SpawnteeAuthenticationError as e:
+                logger.debug("  ⏳ CVM %s auth not ready yet (cert hashes loading): %s", cvm_name, e)
             except SpawnteeClientError as e:
                 logger.debug("  ⏳ CVM %s capacity not ready yet: %s", cvm_name, e)
             time.sleep(interval)
@@ -845,6 +910,40 @@ class PhalaCluster:
             return
 
         if not ready:
+            return
+
+        # Stage 3: wait for auth to work (cert hashes loaded)
+        # /health and /capacity are public endpoints (no auth), so Stages 1-2
+        # can pass even if the CVM can't verify gateway auth yet (cert hashes
+        # not fetched from CPI due to DNS unavailability at boot). We must
+        # verify auth works before promoting this CVM to head, otherwise all
+        # builds routed to it will fail with 401.
+        auth_ready = False
+        while time.monotonic() < deadline:
+            try:
+                # /tasks requires auth — use it as an auth probe
+                new_client.get_tasks()
+                elapsed = max_wait - (deadline - time.monotonic())
+                logger.info(
+                    "  ✅ CVM %s auth verified (cert hashes loaded, took %ds total)",
+                    cvm_name, int(elapsed),
+                )
+                auth_ready = True
+                break
+            except SpawnteeAuthenticationError as e:
+                logger.info(
+                    "  ⏳ CVM %s auth not ready yet (cert hashes loading): %s",
+                    cvm_name, e,
+                )
+            except SpawnteeClientError as e:
+                logger.debug("  ⏳ CVM %s auth probe failed: %s", cvm_name, e)
+            time.sleep(interval)
+
+        if not auth_ready:
+            self._cleanup_failed_runner(
+                new_app_id, cvm_name,
+                f"auth never became ready within {max_wait}s (cert hashes not loaded)"
+            )
             return
 
         # Add to cluster and make it the new head (under lock for state mutation)
@@ -865,12 +964,16 @@ class PhalaCluster:
         # to it will call /registry/re-encrypt over the VPC, which requires the tunnel
         # to be up. The VPC server CVM is the only one upgraded here; the registry is
         # never restarted (that would interrupt running model containers).
-        if self.vpc_enabled:
-            try:
-                self._update_vpc_allowed_apps()
-            except (PhalaClusterError, Exception) as e:
-                self._cleanup_failed_runner(new_app_id, cvm_name, f"could not update VPC_ALLOWED_APPS: {e}")
-                return
+        # TODO: Re-enable once VPC_ALLOWED_APPS=any is no longer used for testing.
+        # Currently the VPC server is deployed with VPC_ALLOWED_APPS=any so all
+        # runners are accepted. Calling _update_vpc_allowed_apps() would overwrite
+        # "any" with a specific list, breaking the allowlist.
+        # if self.vpc_enabled:
+        #     try:
+        #         self._update_vpc_allowed_apps()
+        #     except (PhalaClusterError, Exception) as e:
+        #         self._cleanup_failed_runner(new_app_id, cvm_name, f"could not update VPC_ALLOWED_APPS: {e}")
+        #         return
 
         # Push the new runner's compose hash to the registry so it can
         # verify re-encryption attestation for this runner.
@@ -892,8 +995,8 @@ class PhalaCluster:
         and the registry. This allows newly provisioned runners to register with
         Headscale and join the Wireguard VPN.
 
-        Shells out to `phala cvms upgrade {vpc_server_cvm_id}` — only the VPC server
-        CVM is ever upgraded here. The registry is intentionally never touched (upgrading
+        Shells out to `phala deploy --cvm-id {vpc_server_cvm_id}` — only the VPC server
+        CVM is ever updated here. The registry is intentionally never touched (updating
         it would restart model containers).
 
         Called from _provision_new_runner() after the runner CVM is healthy and accepting
@@ -909,7 +1012,7 @@ class PhalaCluster:
         if not self.vpc_server_compose_path:
             raise PhalaClusterError(
                 "Cannot update VPC_ALLOWED_APPS: vpc_server_compose_path is not configured. "
-                "phala cvms upgrade requires --compose to reliably apply env vars; "
+                "phala deploy --cvm-id requires --compose; "
                 "set vpc_server_compose_path to docker-compose.phala.vpc-server.yml"
             )
 
@@ -932,9 +1035,11 @@ class PhalaCluster:
         logger.debug("  VPC_ALLOWED_APPS=%s", vpc_allowed_apps)
 
         cmd = [
-            "phala", "cvms", "upgrade", self.vpc_server_cvm_id,
+            "phala", "deploy",
+            "--cvm-id", self.vpc_server_cvm_id,
             "--compose", self.vpc_server_compose_path,
             "-e", f"VPC_ALLOWED_APPS={vpc_allowed_apps}",
+            "--json",
         ]
 
         try:
@@ -947,13 +1052,13 @@ class PhalaCluster:
             )
         except subprocess.TimeoutExpired:
             raise PhalaClusterError(
-                f"phala cvms upgrade timed out while updating VPC_ALLOWED_APPS on {self.vpc_server_cvm_id}"
+                f"phala deploy --cvm-id timed out while updating VPC_ALLOWED_APPS on {self.vpc_server_cvm_id}"
             )
 
         if result.returncode != 0:
-            logger.error("  phala cvms upgrade stderr: %s", result.stderr)
+            logger.error("  phala deploy --cvm-id stderr: %s", result.stderr)
             raise PhalaClusterError(
-                f"phala cvms upgrade failed (rc={result.returncode}): {result.stderr}"
+                f"phala deploy --cvm-id failed (rc={result.returncode}): {result.stderr}"
             )
 
         logger.info("  ✅ VPC_ALLOWED_APPS updated on VPC server %s", self.vpc_server_cvm_id)

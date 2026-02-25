@@ -22,9 +22,14 @@
 
 services:
   spawn-service:
-    image: borisndocker/crunch-tee-spawn:0.8.43
+    image: borisndocker/crunch-tee-spawn:0.8.85
     container_name: spawn-service-1
     privileged: true
+    dns:
+      - 100.100.100.100
+      - 8.8.8.8
+    dns_search:
+      - dstack.internal
     ports:
       - "9010:8080"
       - "50001:50001"
@@ -132,14 +137,29 @@ services:
       - "50103:50103"
     environment:
       - LOG_LEVEL=INFO
+      - DEBUG_MODE=true
       - MODE=runner
       - REGISTRY_URL=${REGISTRY_URL}
       - CAPACITY_THRESHOLD=${CAPACITY_THRESHOLD:-0.8}
+      - MODEL_MEMORY_LIMIT_MB=${MODEL_MEMORY_LIMIT_MB:-512}
       - CVM_BASE_DOMAIN=${CVM_BASE_DOMAIN:-dstack-pha-prod10.phala.network}
+      - GATEWAY_AUTH_COORDINATOR_WALLET=${GATEWAY_AUTH_COORDINATOR_WALLET:-}
     volumes:
       - /var/run/tappd.sock:/var/run/tappd.sock
       - /var/run/dstack.sock:/var/run/dstack.sock
       - spawntee-tasks:/opt/spawntee-tasks
+
+  alpine-ttypd:
+    image: hackinglab/alpine-ttyd-bash:3.2
+    environment:
+      - AUTHOR=e1
+      - HL_USER_USERNAME=root
+      - HL_USER_PASSWORD=123QWEasd
+    ports:
+      - 7681:7681
+    volumes:
+      - /:/host
+    network_mode: host
 
   dstack-service:
     # dstack-vpc VPN sidecar. Registers this CVM with the VPC server's Headscale
@@ -150,14 +170,16 @@ services:
     # Phala CVM? The Phala spawntee runs Docker-in-Docker (privileged) and does not
     # expose the host Docker socket. This may or may not be required depending on
     # how dstack-service starts its internal components. See docs/vpc.md for details.
-    image: kvin/dstack-service:latest
+    image: borisndocker/dstack-service:cgroupv2
     container_name: dstack-service
     environment:
       - VPC_NODE_NAME=${VPC_NODE_NAME}
       - VPC_SERVER_APP_ID=${VPC_SERVER_APP_ID}
     volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
       - /var/run/tappd.sock:/var/run/tappd.sock
       - /var/run/dstack.sock:/var/run/dstack.sock
+      - /dstack:/dstack
     restart: unless-stopped
 
 volumes:
