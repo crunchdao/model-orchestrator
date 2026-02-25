@@ -25,6 +25,18 @@ infrastructure:
     max-models: 20                   # global cap across the entire cluster
     # gateway-key-path: "/path/to/coordinator/key.pem"
 
+    # VPC Access Control (VPCAC) — opt-in, disabled by default.
+    # When enabled, runners are pinned to the registry's physical server,
+    # deployed with a dstack-service VPN sidecar, and /registry/re-encrypt
+    # traffic moves inside the Wireguard tunnel instead of over the public internet.
+    # See docs/vpc.md for the full bootstrap sequence.
+    #
+    # vpc-enabled: false
+    # vpc-server-cvm-id: ""          # app_id of the VPC server CVM (required if vpc_enabled)
+    #
+    # When vpc-enabled is true, also point runner-compose-path at the VPC variant:
+    # runner-compose-path: "model_orchestrator/data/docker-compose.phala.runner.vpc.yml"
+
 watcher:
   interval: 10
   poller:

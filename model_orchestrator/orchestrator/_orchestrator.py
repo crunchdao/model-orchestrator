@@ -105,6 +105,10 @@ class Orchestrator:
                     max_models=runner_config.max_models,
                     gateway_key_path=runner_config.gateway_key_path,
                     get_active_model_count=_get_active_model_count,
+                    vpc_enabled=runner_config.vpc_enabled,
+                    vpc_server_cvm_id=runner_config.vpc_server_cvm_id,
+                    vpc_server_compose_path=runner_config.vpc_server_compose_path,
+                    vpc_registry_node_name=runner_config.vpc_registry_node_name,
                 )
                 cluster.discover()
                 cluster.rebuild_task_map()
