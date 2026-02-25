@@ -511,9 +511,10 @@ class TestUpdateVPCAllowedApps:
         call_args = mock_run.call_args[0][0]  # positional cmd list
 
         assert call_args[0] == "phala"
-        assert call_args[1] == "cvms"
-        assert call_args[2] == "upgrade"
-        assert call_args[3] == "vpc-server-app-id"
+        assert call_args[1] == "deploy"
+        assert "--cvm-id" in call_args
+        cvm_id_idx = call_args.index("--cvm-id")
+        assert call_args[cvm_id_idx + 1] == "vpc-server-app-id"
 
         # --compose must always be present (bare -e without --compose is unverified)
         assert "--compose" in call_args
@@ -574,7 +575,7 @@ class TestUpdateVPCAllowedApps:
 
         with patch("subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="some error")
-            with pytest.raises(PhalaClusterError, match="phala cvms upgrade failed"):
+            with pytest.raises(PhalaClusterError, match="phala deploy --cvm-id failed"):
                 cluster._update_vpc_allowed_apps()
 
 
@@ -614,12 +615,16 @@ class TestVPCProvisioning:
 
         new_client = MagicMock(spec=SpawnteeClient)
         new_client.health.return_value = {"status": "healthy", "service": "secure-spawn", "mode": "runner"}
+        new_client.probe_health.return_value = {"status": "healthy", "service": "secure-spawn", "mode": "runner"}
         new_client.capacity.return_value = {"accepting_new_models": True}
+        new_client.probe_capacity.return_value = {"accepting_new_models": True}
         new_client.has_capacity.return_value = True
+        new_client.get_tasks.return_value = []  # Stage 3 auth probe
 
         with patch("subprocess.run", side_effect=fake_run), \
              patch.object(cluster, "_get_node_name", return_value="prod10"), \
              patch.object(cluster, "_approve_runner_hashes_on_registry"), \
+             patch.object(cluster, "_update_vpc_allowed_apps"), \
              patch("model_orchestrator.infrastructure.phala._cluster.SpawnteeClient",
                    return_value=new_client):
             cluster._provision_new_runner()
@@ -648,8 +653,11 @@ class TestVPCProvisioning:
 
         new_client = MagicMock(spec=SpawnteeClient)
         new_client.health.return_value = {"status": "healthy", "service": "secure-spawn", "mode": "runner"}
+        new_client.probe_health.return_value = {"status": "healthy", "service": "secure-spawn", "mode": "runner"}
         new_client.capacity.return_value = {"accepting_new_models": True}
+        new_client.probe_capacity.return_value = {"accepting_new_models": True}
         new_client.has_capacity.return_value = True
+        new_client.get_tasks.return_value = []  # Stage 3 auth probe
 
         with patch("subprocess.run", side_effect=fake_run), \
              patch.object(cluster, "_get_node_name", return_value="prod10"), \
@@ -677,8 +685,11 @@ class TestVPCProvisioning:
 
         new_client = MagicMock(spec=SpawnteeClient)
         new_client.health.return_value = {"status": "healthy", "service": "secure-spawn", "mode": "runner"}
+        new_client.probe_health.return_value = {"status": "healthy", "service": "secure-spawn", "mode": "runner"}
         new_client.capacity.return_value = {"accepting_new_models": True}
+        new_client.probe_capacity.return_value = {"accepting_new_models": True}
         new_client.has_capacity.return_value = True
+        new_client.get_tasks.return_value = []  # Stage 3 auth probe
 
         with patch("subprocess.run", side_effect=fake_run), \
              patch.object(cluster, "_get_node_name", return_value="prod10"), \
@@ -699,8 +710,11 @@ class TestVPCProvisioning:
 
         new_client = MagicMock(spec=SpawnteeClient)
         new_client.health.return_value = {"status": "healthy", "service": "secure-spawn", "mode": "runner"}
+        new_client.probe_health.return_value = {"status": "healthy", "service": "secure-spawn", "mode": "runner"}
         new_client.capacity.return_value = {"accepting_new_models": True}
+        new_client.probe_capacity.return_value = {"accepting_new_models": True}
         new_client.has_capacity.return_value = True
+        new_client.get_tasks.return_value = []  # Stage 3 auth probe
 
         with patch("subprocess.run", side_effect=fake_run), \
              patch.object(cluster, "_get_node_name", return_value="prod10"), \
