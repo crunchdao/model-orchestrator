@@ -964,16 +964,12 @@ class PhalaCluster:
         # to it will call /registry/re-encrypt over the VPC, which requires the tunnel
         # to be up. The VPC server CVM is the only one upgraded here; the registry is
         # never restarted (that would interrupt running model containers).
-        # TODO: Re-enable once VPC_ALLOWED_APPS=any is no longer used for testing.
-        # Currently the VPC server is deployed with VPC_ALLOWED_APPS=any so all
-        # runners are accepted. Calling _update_vpc_allowed_apps() would overwrite
-        # "any" with a specific list, breaking the allowlist.
-        # if self.vpc_enabled:
-        #     try:
-        #         self._update_vpc_allowed_apps()
-        #     except (PhalaClusterError, Exception) as e:
-        #         self._cleanup_failed_runner(new_app_id, cvm_name, f"could not update VPC_ALLOWED_APPS: {e}")
-        #         return
+        if self.vpc_enabled:
+            try:
+                self._update_vpc_allowed_apps()
+            except (PhalaClusterError, Exception) as e:
+                self._cleanup_failed_runner(new_app_id, cvm_name, f"could not update VPC_ALLOWED_APPS: {e}")
+                return
 
         # Push the new runner's compose hash to the registry so it can
         # verify re-encryption attestation for this runner.
