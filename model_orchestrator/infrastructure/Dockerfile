@@ -38,7 +38,7 @@ RUN pip install --upgrade pip && \
 
 COPY submission/code/ ./
 COPY resources /workspace/resources
-COPY certificates /workspace/certificates
+COPY certificates/* /workspace/certificates
 
 RUN ln -s /workspace/resources/ /workspace/submission/code/resources
 
