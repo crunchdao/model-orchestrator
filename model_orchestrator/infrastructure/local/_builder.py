@@ -189,6 +189,9 @@ class _DockerBuild:
             else:
                 os.makedirs(resource_temp_dir, exist_ok=True)
 
+            certificates_temp_dir = os.path.join(temp_dir, 'certificates')
+            os.makedirs(certificates_temp_dir, exist_ok=True)
+
             image, _ = self._build_image(temp_dir, image_name_with_tag, task_name)
 
         return image.id
