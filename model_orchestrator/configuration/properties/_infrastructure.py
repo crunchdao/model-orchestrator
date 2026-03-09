@@ -20,6 +20,8 @@ class AwsRunnerInfrastructureConfig(_BaseConfig):
     s3_bucket_name: str = Field("crunchdao--competition--staging", description="S3 bucket name for model submissions and resources")
     codebuild_project_name: str = Field("model-builder", description="AWS CodeBuild project name for building models")
     ecr_repository_name: str = Field("crunchers-models-staging", description="AWS ECR name for saving models")
+    max_task_restarts: int = Field(4, description="Maximum number of task restarts within the restart window before marking as FAILED")
+    restart_window_hours: int = Field(24, description="Time window in hours for counting task restarts")
 
 
 class LocalRunnerInfrastructureConfig(_BaseConfig):

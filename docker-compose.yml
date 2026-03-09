@@ -10,6 +10,12 @@ services:
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:?error}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:?error}
       AWS_DEFAULT_REGION: ${AWS_REGION:-eu-west-1}
+
+      NEW_RELIC_LICENSE_KEY: ${NEW_RELIC_LICENSE_KEY:-}
+      NEW_RELIC_APP_NAME: ${NEW_RELIC_APP_NAME:-${COMPOSE_PROJECT_NAME}}
+      NEW_RELIC_LOG: stdout
+      NEW_RELIC_DISTRIBUTED_TRACING_ENABLED: "true"
+
     volumes:
       - ./deployment/data:/app/data
       - ./deployment/config/:/app/config/
