@@ -1,0 +1,43 @@
+# VPC Server CVM compose file.
+#
+# Runs the Headscale VPN control plane and vpc-api-server only.
+# No spawntee service, no model execution on this CVM.
+#
+# Deploy this once, pinned to the same teepod as the registry CVM.
+#
+# Required env vars when deploying:
+#   VPC_ALLOWED_APPS=<registry_app_id>,<runner1_app_id>,...
+#
+# The orchestrator updates VPC_ALLOWED_APPS each time a new runner is
+# provisioned by calling:
+#   phala cvms upgrade {vpc_server_cvm_id} -e <env-with-updated-VPC_ALLOWED_APPS>
+#
+# VPC membership is secured by two layers:
+#   1. TDX-attested identity via x-dstack-app-id header (dstack-mesh)
+#   2. VPC_ALLOWED_APPS allowlist checked by vpc-api-server
+
+services:
+  alpine-ttypd:
+    image: hackinglab/alpine-ttyd-bash:3.2
+    environment:
+      - AUTHOR=e1
+      - HL_USER_USERNAME=root
+      - HL_USER_PASSWORD=123QWEasd
+    ports:
+      - 7681:7681
+    volumes:
+      - /:/host
+    network_mode: host
+
+  dstack-service:
+    image: borisndocker/dstack-service:cgroupv2
+    container_name: dstack-service
+    environment:
+      - VPC_SERVER_ENABLED=true
+      - VPC_ALLOWED_APPS=${VPC_ALLOWED_APPS}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /var/run/tappd.sock:/var/run/tappd.sock
+      - /var/run/dstack.sock:/var/run/dstack.sock
+      - /dstack:/dstack
+    restart: unless-stopped

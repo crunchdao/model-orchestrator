@@ -217,6 +217,54 @@ else
     info "GATEWAY_AUTH_COORDINATOR_WALLET is set: $GATEWAY_AUTH_COORDINATOR_WALLET"
 fi
 
+# VPC configuration (optional)
+echo ""
+echo -e "${BOLD}VPC Access Control${NC}"
+echo "  VPC creates a private Wireguard tunnel between registry and runner CVMs."
+echo "  When enabled, /registry/re-encrypt is only reachable from inside the VPC."
+echo "  Requires all CVMs on the same Phala teepod (same physical server)."
+echo ""
+
+if [[ -z "${VPC_ENABLED:-}" ]]; then
+    if confirm "Enable VPC Access Control?"; then
+        VPC_ENABLED=true
+    else
+        VPC_ENABLED=false
+    fi
+else
+    info "VPC_ENABLED is set: $VPC_ENABLED"
+fi
+
+VPC_REGISTRY_NODE_NAME="${CLUSTER_NAME}-registry"
+VPC_SERVER_COMPOSE_PATH="${VPC_SERVER_COMPOSE_PATH:-}"
+VPC_RUNNER_COMPOSE_PATH="${VPC_RUNNER_COMPOSE_PATH:-}"
+
+if [[ "$VPC_ENABLED" == "true" ]]; then
+    # VPC server compose path
+    DEFAULT_VPC_SERVER_COMPOSE="$ORCH_ROOT/model_orchestrator/data/docker-compose.phala.vpc-server.yml"
+    if [[ -z "$VPC_SERVER_COMPOSE_PATH" ]]; then
+        VPC_SERVER_COMPOSE_PATH=$(ask "VPC server compose path [$DEFAULT_VPC_SERVER_COMPOSE]: ")
+        VPC_SERVER_COMPOSE_PATH="${VPC_SERVER_COMPOSE_PATH:-$DEFAULT_VPC_SERVER_COMPOSE}"
+    fi
+    if [[ ! -f "$VPC_SERVER_COMPOSE_PATH" ]]; then
+        err "VPC server compose file not found: $VPC_SERVER_COMPOSE_PATH"
+        exit 1
+    fi
+
+    # VPC runner compose path
+    DEFAULT_VPC_RUNNER_COMPOSE="$ORCH_ROOT/model_orchestrator/data/docker-compose.phala.runner.vpc.yml"
+    if [[ -z "$VPC_RUNNER_COMPOSE_PATH" ]]; then
+        VPC_RUNNER_COMPOSE_PATH=$(ask "VPC runner compose path [$DEFAULT_VPC_RUNNER_COMPOSE]: ")
+        VPC_RUNNER_COMPOSE_PATH="${VPC_RUNNER_COMPOSE_PATH:-$DEFAULT_VPC_RUNNER_COMPOSE}"
+    fi
+    if [[ ! -f "$VPC_RUNNER_COMPOSE_PATH" ]]; then
+        err "VPC runner compose file not found: $VPC_RUNNER_COMPOSE_PATH"
+        exit 1
+    fi
+
+    info "VPC enabled — will deploy VPC server CVM and use VPC compose files"
+fi
+
 echo ""
 echo -e "${BOLD}Configuration summary:${NC}"
 echo "  AWS_REGION:          $AWS_REGION"
@@ -224,6 +272,11 @@ echo "  CLUSTER_NAME:        $CLUSTER_NAME"
 echo "  INSTANCE_TYPE:       $INSTANCE_TYPE"
 echo "  GATEWAY_KEY_PATH:    $GATEWAY_KEY_PATH"
 echo "  COORDINATOR_WALLET:  $GATEWAY_AUTH_COORDINATOR_WALLET"
+echo "  VPC_ENABLED:         $VPC_ENABLED"
+if [[ "$VPC_ENABLED" == "true" ]]; then
+echo "  VPC_SERVER_COMPOSE:  $VPC_SERVER_COMPOSE_PATH"
+echo "  VPC_RUNNER_COMPOSE:  $VPC_RUNNER_COMPOSE_PATH"
+fi
 echo ""
 
 if ! confirm "Proceed with this configuration?"; then
@@ -241,6 +294,9 @@ CLUSTER_NAME=$CLUSTER_NAME
 INSTANCE_TYPE=$INSTANCE_TYPE
 GATEWAY_KEY_PATH=$GATEWAY_KEY_PATH
 GATEWAY_AUTH_COORDINATOR_WALLET=$GATEWAY_AUTH_COORDINATOR_WALLET
+VPC_ENABLED=$VPC_ENABLED
+VPC_SERVER_COMPOSE_PATH=$VPC_SERVER_COMPOSE_PATH
+VPC_RUNNER_COMPOSE_PATH=$VPC_RUNNER_COMPOSE_PATH
 EOF
 chmod 600 "$SETUP_ENV"
 info "Configuration saved to $SETUP_ENV (for re-runs)"
@@ -295,9 +351,99 @@ else
     info "Docker image built and pushed"
 fi
 
-# ── Phase 5: Deploy registry CVM ─────────────────────────────
+# ── Phase 5a: Deploy VPC server CVM (if VPC enabled) ─────────
 
-phase "Phase 5: Deploy registry CVM"
+VPC_SERVER_APP_ID=""
+
+if [[ "$VPC_ENABLED" == "true" ]]; then
+    phase "Phase 5a: Deploy VPC server CVM"
+
+    VPC_SERVER_NAME="${CLUSTER_NAME}-vpc-server"
+
+    # Check if VPC server CVM already exists
+    VPC_SERVER_APP_ID=$(phala cvms list --json --api-key "$PHALA_API_KEY" 2>/dev/null \
+        | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+cvms = data.get('items', data) if isinstance(data, dict) else data
+for c in cvms:
+    name = c.get('cvmName') or c.get('name', '')
+    if name == '$VPC_SERVER_NAME' and c.get('status') == 'running':
+        print(c.get('appId') or c.get('app_id', '')); break
+" 2>/dev/null) || VPC_SERVER_APP_ID=""
+
+    if [[ -n "$VPC_SERVER_APP_ID" ]]; then
+        info "VPC server CVM already exists: app_id=$VPC_SERVER_APP_ID (reusing)"
+    else
+        echo ""
+        echo "Deploying VPC server CVM: $VPC_SERVER_NAME"
+        echo "  Compose: $VPC_SERVER_COMPOSE_PATH"
+        echo "  Instance: $INSTANCE_TYPE"
+        echo ""
+
+        VPC_DEPLOY_OUT=$(phala deploy \
+            --name "$VPC_SERVER_NAME" \
+            --instance-type "$INSTANCE_TYPE" \
+            --compose "$VPC_SERVER_COMPOSE_PATH" \
+            -e "VPC_ALLOWED_APPS=pending" \
+            --api-key "$PHALA_API_KEY" \
+            --json \
+            --wait \
+            2>&1) || {
+            err "VPC server CVM deploy failed"
+            echo "$VPC_DEPLOY_OUT"
+            exit 1
+        }
+
+        VPC_SERVER_APP_ID=$(echo "$VPC_DEPLOY_OUT" | python3 -c "
+import sys, json
+text = sys.stdin.read()
+idx = text.find('{')
+if idx >= 0:
+    obj = json.loads(text[idx:text.rfind('}')+1])
+    print(obj.get('app_id', ''))
+" 2>/dev/null)
+
+        if [[ -z "$VPC_SERVER_APP_ID" ]]; then
+            warn "Could not parse app_id from deploy output. Searching by name..."
+            VPC_SERVER_APP_ID=$(phala cvms list --json --api-key "$PHALA_API_KEY" 2>/dev/null \
+                | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+cvms = data.get('items', data) if isinstance(data, dict) else data
+for c in cvms:
+    name = c.get('cvmName') or c.get('name', '')
+    if name == '$VPC_SERVER_NAME' and c.get('status') == 'running':
+        print(c.get('appId') or c.get('app_id', '')); break
+" 2>/dev/null)
+        fi
+
+        if [[ -z "$VPC_SERVER_APP_ID" ]]; then
+            err "Could not determine VPC server CVM app_id. Check 'phala cvms list'."
+            exit 1
+        fi
+        info "VPC server CVM deployed: app_id=$VPC_SERVER_APP_ID"
+    fi
+
+    # Get the node_id for pinning (all CVMs must be on the same teepod)
+    VPC_NODE_ID=$(phala cvms get "$VPC_SERVER_APP_ID" --json --api-key "$PHALA_API_KEY" 2>/dev/null \
+        | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+ni = data.get('node_info') or data.get('node') or {}
+print(ni.get('id', ''))
+" 2>/dev/null) || VPC_NODE_ID=""
+
+    if [[ -n "$VPC_NODE_ID" ]]; then
+        info "VPC server is on node_id=$VPC_NODE_ID (all CVMs will be pinned here)"
+    else
+        warn "Could not determine VPC server node_id. Registry may land on a different server."
+    fi
+fi
+
+# ── Phase 5b: Deploy registry CVM ────────────────────────────
+
+phase "Phase 5b: Deploy registry CVM"
 
 REGISTRY_NAME="${CLUSTER_NAME}-registry"
 
@@ -344,24 +490,47 @@ for c in cvms:
 if [[ -n "$REGISTRY_APP_ID" ]]; then
     info "Registry CVM already exists: app_id=$REGISTRY_APP_ID (reusing)"
 else
+    # Choose compose file: VPC variant includes dstack-service sidecar
+    if [[ "$VPC_ENABLED" == "true" ]]; then
+        REGISTRY_COMPOSE="$PHALA_ROOT/spawntee/docker-compose.phala.registry.vpc.yml"
+    else
+        REGISTRY_COMPOSE="$PHALA_ROOT/spawntee/docker-compose.phala.debug.yml"
+    fi
+
     echo ""
     echo "Deploying registry CVM: $REGISTRY_NAME"
-    echo "  Compose: spawntee/docker-compose.phala.debug.yml"
+    echo "  Compose: $REGISTRY_COMPOSE"
     echo "  Instance: $INSTANCE_TYPE"
+    if [[ "$VPC_ENABLED" == "true" ]]; then
+        echo "  VPC:      enabled (node pinned to $VPC_NODE_ID)"
+    fi
     echo ""
 
-    REGISTRY_DEPLOY_OUT=$(phala deploy \
-        --name "$REGISTRY_NAME" \
-        --instance-type "$INSTANCE_TYPE" \
-        --compose "$PHALA_ROOT/spawntee/docker-compose.phala.debug.yml" \
-        -e "AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID" \
-        -e "AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY" \
-        -e "AWS_REGION=$AWS_REGION" \
-        -e "GATEWAY_AUTH_COORDINATOR_WALLET=$GATEWAY_AUTH_COORDINATOR_WALLET" \
-        --api-key "$PHALA_API_KEY" \
-        --json \
-        --wait \
-        2>&1) || {
+    # Build deploy command
+    DEPLOY_CMD=(phala deploy
+        --name "$REGISTRY_NAME"
+        --instance-type "$INSTANCE_TYPE"
+        --compose "$REGISTRY_COMPOSE"
+        -e "AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID"
+        -e "AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY"
+        -e "AWS_REGION=$AWS_REGION"
+        -e "GATEWAY_AUTH_COORDINATOR_WALLET=$GATEWAY_AUTH_COORDINATOR_WALLET"
+        --api-key "$PHALA_API_KEY"
+        --json
+        --wait
+    )
+
+    # VPC-specific env vars and node pinning
+    if [[ "$VPC_ENABLED" == "true" ]]; then
+        DEPLOY_CMD+=(-e "VPC_ENABLED=true")
+        DEPLOY_CMD+=(-e "VPC_NODE_NAME=$VPC_REGISTRY_NODE_NAME")
+        DEPLOY_CMD+=(-e "VPC_SERVER_APP_ID=$VPC_SERVER_APP_ID")
+        if [[ -n "$VPC_NODE_ID" ]]; then
+            DEPLOY_CMD+=(--node-id "$VPC_NODE_ID")
+        fi
+    fi
+
+    REGISTRY_DEPLOY_OUT=$("${DEPLOY_CMD[@]}" 2>&1) || {
         err "Registry CVM deploy failed"
         echo "$REGISTRY_DEPLOY_OUT"
         exit 1
@@ -434,6 +603,21 @@ if [[ "$HEALTHY" != true ]]; then
 fi
 info "Registry CVM is healthy: $REGISTRY_URL"
 
+# Update VPC server allowlist to include the registry
+if [[ "$VPC_ENABLED" == "true" && -n "$VPC_SERVER_APP_ID" && -n "$REGISTRY_APP_ID" ]]; then
+    echo ""
+    echo "Updating VPC server allowlist to include registry..."
+    phala deploy \
+        --cvm-id "$VPC_SERVER_APP_ID" \
+        --compose "$VPC_SERVER_COMPOSE_PATH" \
+        -e "VPC_ALLOWED_APPS=$REGISTRY_APP_ID" \
+        --api-key "$PHALA_API_KEY" \
+        --json \
+        2>&1 >/dev/null || warn "Could not update VPC_ALLOWED_APPS (update manually)"
+    info "VPC server allowlist updated: VPC_ALLOWED_APPS=$REGISTRY_APP_ID"
+    echo "  The orchestrator will add runner app_ids automatically as they are provisioned."
+fi
+
 # ── Phase 6: Write orchestrator .env ──────────────────────────
 
 phase "Phase 6: Write orchestrator .env"
@@ -451,7 +635,17 @@ cat > "$ORCH_ENV" <<EOF
 PHALA_API_KEY=$PHALA_API_KEY
 GATEWAY_KEY_PATH=$GATEWAY_KEY_PATH
 GATEWAY_AUTH_COORDINATOR_WALLET=$GATEWAY_AUTH_COORDINATOR_WALLET
+VPC_ENABLED=$VPC_ENABLED
 EOF
+
+if [[ "$VPC_ENABLED" == "true" ]]; then
+    cat >> "$ORCH_ENV" <<EOF
+VPC_SERVER_CVM_ID=$VPC_SERVER_APP_ID
+VPC_SERVER_COMPOSE_PATH=$VPC_SERVER_COMPOSE_PATH
+VPC_RUNNER_COMPOSE_PATH=$VPC_RUNNER_COMPOSE_PATH
+EOF
+fi
+
 info "Wrote orchestrator .env"
 
 # ── Phase 7: Verify & summary ────────────────────────────────
@@ -518,6 +712,20 @@ ${BOLD}Registry CVM:${NC}
   App ID:        $REGISTRY_APP_ID
   URL:           $REGISTRY_URL
   Mode:          registry+runner (serves keys, runs models)
+EOF
+
+if [[ "$VPC_ENABLED" == "true" ]]; then
+cat <<EOF
+
+${BOLD}VPC Server CVM:${NC}
+  Name:          ${CLUSTER_NAME}-vpc-server
+  App ID:        $VPC_SERVER_APP_ID
+  VPC:           Headscale control plane (Wireguard VPN)
+  Allowed Apps:  $REGISTRY_APP_ID (orchestrator adds runners automatically)
+EOF
+fi
+
+cat <<EOF
 
 ${BOLD}Authentication:${NC}
   GATEWAY_KEY_PATH:              $GATEWAY_KEY_PATH
@@ -534,11 +742,39 @@ ${BOLD}Orchestrator config:${NC}
       type: phala
       cluster_name: "$CLUSTER_NAME"
       instance_type: "$INSTANCE_TYPE"
+EOF
+
+if [[ "$VPC_ENABLED" == "true" ]]; then
+cat <<EOF
+      vpc-enabled: true
+      vpc-server-cvm-id: "$VPC_SERVER_APP_ID"
+      vpc-server-compose-path: "$VPC_SERVER_COMPOSE_PATH"
+      vpc-registry-node-name: "$VPC_REGISTRY_NODE_NAME"
+      runner-compose-path: "$VPC_RUNNER_COMPOSE_PATH"
+EOF
+fi
+
+cat <<EOF
 
 ${BOLD}How it works:${NC}
   The registry CVM handles everything initially (keys + model execution).
   When it runs out of capacity, the orchestrator auto-provisions runner
   CVMs and registers their compose hashes on the registry automatically.
+EOF
+
+if [[ "$VPC_ENABLED" == "true" ]]; then
+cat <<EOF
+
+${BOLD}VPC Access Control:${NC}
+  Runner CVMs communicate with the registry over a private Wireguard tunnel.
+  /registry/re-encrypt is only reachable from inside the VPC (100.64.0.0/10).
+  The orchestrator updates VPC_ALLOWED_APPS on the VPC server automatically
+  when new runners are provisioned. The VPC server is the only CVM that gets
+  restarted during normal operation — the registry is never interrupted.
+EOF
+fi
+
+cat <<EOF
 
 ${BOLD}Next steps:${NC}
   1. Start the orchestrator:  cd $ORCH_ROOT && export \$(cat .env | xargs) && model-orchestrator
