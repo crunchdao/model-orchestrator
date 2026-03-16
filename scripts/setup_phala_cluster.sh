@@ -188,6 +188,69 @@ fi
 
 echo ""
 
+# Node selection (determines CVM_BASE_DOMAIN)
+if [[ -z "${PHALA_NODE_NAME:-}" ]]; then
+    echo "Querying available Phala nodes..."
+    NODE_LIST=$(curl -sf -H "accept: application/json" -H "x-api-key: $PHALA_API_KEY" \
+        "https://cloud-api.phala.network/api/v1/teepods/available" 2>/dev/null \
+        | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+nodes = data.get('nodes', [])
+for n in nodes:
+    print(f'{n[\"name\"]}|{n[\"teepod_id\"]}|{n.get(\"region_identifier\", \"?\")}')
+" 2>/dev/null) || NODE_LIST=""
+
+    if [[ -z "$NODE_LIST" ]]; then
+        err "Could not query available nodes. Check PHALA_API_KEY."
+        exit 1
+    fi
+
+    echo ""
+    echo "Available nodes:"
+    while IFS='|' read -r name tid region; do
+        echo "  $name  (region: $region, teepod_id: $tid)"
+    done <<< "$NODE_LIST"
+    echo ""
+
+    PHALA_NODE_NAME=$(ask "Node name: ")
+    if [[ -z "$PHALA_NODE_NAME" ]]; then
+        err "Node selection is required"
+        exit 1
+    fi
+
+    # Look up teepod_id for chosen node
+    PHALA_NODE_ID=$(echo "$NODE_LIST" | while IFS='|' read -r name tid region; do
+        if [[ "$name" == "$PHALA_NODE_NAME" ]]; then echo "$tid"; break; fi
+    done)
+
+    if [[ -z "$PHALA_NODE_ID" ]]; then
+        err "Unknown node: $PHALA_NODE_NAME"
+        exit 1
+    fi
+else
+    info "PHALA_NODE_NAME is set: $PHALA_NODE_NAME"
+    # Look up teepod_id
+    PHALA_NODE_ID=$(curl -sf -H "accept: application/json" -H "x-api-key: $PHALA_API_KEY" \
+        "https://cloud-api.phala.network/api/v1/teepods/available" 2>/dev/null \
+        | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+for n in data.get('nodes', []):
+    if n['name'] == '$PHALA_NODE_NAME':
+        print(n['teepod_id']); break
+" 2>/dev/null) || PHALA_NODE_ID=""
+    if [[ -z "$PHALA_NODE_ID" ]]; then
+        err "Could not find teepod_id for node $PHALA_NODE_NAME"
+        exit 1
+    fi
+fi
+
+CVM_BASE_DOMAIN="dstack-pha-${PHALA_NODE_NAME}.phala.network"
+info "Node: $PHALA_NODE_NAME (teepod_id=$PHALA_NODE_ID, domain=$CVM_BASE_DOMAIN)"
+
+echo ""
+
 default_cluster="crunch-tee"
 if [[ -z "${CLUSTER_NAME:-}" ]]; then
     CLUSTER_NAME=$(ask "Cluster name prefix [$default_cluster]: ")
@@ -224,6 +287,7 @@ echo "  CLUSTER_NAME:        $CLUSTER_NAME"
 echo "  INSTANCE_TYPE:       $INSTANCE_TYPE"
 echo "  GATEWAY_KEY_PATH:    $GATEWAY_KEY_PATH"
 echo "  COORDINATOR_WALLET:  $GATEWAY_AUTH_COORDINATOR_WALLET"
+echo "  NODE:              $PHALA_NODE_NAME ($CVM_BASE_DOMAIN)"
 echo ""
 
 if ! confirm "Proceed with this configuration?"; then
@@ -241,6 +305,9 @@ CLUSTER_NAME=$CLUSTER_NAME
 INSTANCE_TYPE=$INSTANCE_TYPE
 GATEWAY_KEY_PATH=$GATEWAY_KEY_PATH
 GATEWAY_AUTH_COORDINATOR_WALLET=$GATEWAY_AUTH_COORDINATOR_WALLET
+PHALA_NODE_NAME=$PHALA_NODE_NAME
+PHALA_NODE_ID=$PHALA_NODE_ID
+CVM_BASE_DOMAIN=$CVM_BASE_DOMAIN
 EOF
 chmod 600 "$SETUP_ENV"
 info "Configuration saved to $SETUP_ENV (for re-runs)"
@@ -343,6 +410,7 @@ for c in cvms:
 
 if [[ -n "$REGISTRY_APP_ID" ]]; then
     info "Registry CVM already exists: app_id=$REGISTRY_APP_ID (reusing)"
+    REGISTRY_URL="https://${REGISTRY_APP_ID}-9010.${CVM_BASE_DOMAIN}"
 else
     echo ""
     echo "Deploying registry CVM: $REGISTRY_NAME"
@@ -353,11 +421,13 @@ else
     REGISTRY_DEPLOY_OUT=$(phala deploy \
         --name "$REGISTRY_NAME" \
         --instance-type "$INSTANCE_TYPE" \
+        --node-id "$PHALA_NODE_ID" \
         --compose "$PHALA_ROOT/spawntee/docker-compose.phala.debug.yml" \
         -e "AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID" \
         -e "AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY" \
         -e "AWS_REGION=$AWS_REGION" \
         -e "GATEWAY_AUTH_COORDINATOR_WALLET=$GATEWAY_AUTH_COORDINATOR_WALLET" \
+        -e "CVM_BASE_DOMAIN=$CVM_BASE_DOMAIN" \
         --api-key "$PHALA_API_KEY" \
         --json \
         --wait \
@@ -398,21 +468,7 @@ for c in cvms:
     info "Registry CVM deployed: app_id=$REGISTRY_APP_ID"
 fi
 
-# Get node_name for URL construction
-REGISTRY_NODE=$(phala cvms get "$REGISTRY_APP_ID" --json --api-key "$PHALA_API_KEY" 2>/dev/null \
-    | python3 -c "
-import sys, json
-data = json.load(sys.stdin)
-ni = data.get('node_info') or data.get('node') or {}
-print(ni.get('name', ''))
-" 2>/dev/null) || REGISTRY_NODE=""
-
-if [[ -z "$REGISTRY_NODE" ]]; then
-    warn "Could not get node_name. Using default domain."
-    REGISTRY_NODE="prod10"
-fi
-
-REGISTRY_URL="https://${REGISTRY_APP_ID}-9010.dstack-pha-${REGISTRY_NODE}.phala.network"
+REGISTRY_URL="https://${REGISTRY_APP_ID}-9010.${CVM_BASE_DOMAIN}"
 
 # Wait for healthy
 echo "Waiting for registry to become healthy at $REGISTRY_URL ..."
