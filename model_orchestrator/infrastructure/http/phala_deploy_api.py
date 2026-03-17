@@ -80,12 +80,21 @@ def create_phala_deploy_api(services: PhalaDeployServices) -> FastAPI:
         except Exception:
             raise HTTPException(status_code=404, detail="Task %s not found in cluster routing" % task_id)
 
-        if type == LogType.builder:
-            response = client.get_builder_logs(task_id, follow=follow, from_start=from_start, stream=follow)
-        elif type == LogType.runner:
-            response = client.get_runner_logs(task_id, follow=follow, from_start=from_start, stream=follow)
-        else:
-            raise HTTPException(status_code=400, detail="Invalid log type")
+        try:
+            if type == LogType.builder:
+                response = client.get_builder_logs(task_id, follow=follow, from_start=from_start, stream=follow)
+            elif type == LogType.runner:
+                response = client.get_runner_logs(task_id, follow=follow, from_start=from_start, stream=follow)
+            else:
+                raise HTTPException(status_code=400, detail="Invalid log type")
+        except HTTPException:
+            raise
+        except Exception as e:
+            error_msg = str(e)
+            if "404" in error_msg:
+                raise HTTPException(status_code=404, detail="No logs found for task %s" % task_id)
+            logger.warning("Failed to fetch %s logs for task %s: %s", type.value, task_id, error_msg)
+            raise HTTPException(status_code=502, detail="Failed to fetch logs from CVM")
 
         media_type = "application/x-ndjson"
         headers = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
