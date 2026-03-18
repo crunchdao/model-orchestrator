@@ -34,7 +34,7 @@ class TournamentApi(AugmentedModelInfoRepository):
         url = f"{self.url}/v4/projects/~"
         result = {}
         for ids in batched(model_ids, self.CHUNK_SIZE):
-            get_logger().trace("Fetching models from %s for model_ids %s", url, model_ids)
+            get_logger().trace("Fetching models from %s for model_ids %s", url, ids)
             response = requests.post(url, json=ids)
             if response.status_code != 200:
                 raise Exception(f"Failed to fetch data from API: {response.status_code} - {response.text}. URL: {url}")
