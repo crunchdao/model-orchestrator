@@ -50,6 +50,18 @@ class TournamentApi(AugmentedModelInfoRepository):
 
         return result
 
+    def load_storage_references(self, submission_id: str) -> dict | None:
+        url = f"{self.url}/v4/submissions/{submission_id}/storage"
+        try:
+            response = requests.get(url)
+            if response.status_code == 404:
+                return None
+            response.raise_for_status()
+            return response.json()
+        except requests.RequestException as e:
+            get_logger().error("Failed to fetch storage references for %s: %s", submission_id, e)
+            return None
+
     def _should_refresh_user_mapping(self) -> bool:
         """Determines if user mapping should be refreshed based on the interval."""
         if self.last_user_mapping_refresh is None:
