@@ -47,9 +47,10 @@ class PhalaModelBuilder(Builder):
     The orchestrator submits the build and then polls for completion.
     """
 
-    def __init__(self, cluster: PhalaCluster):
+    def __init__(self, cluster: PhalaCluster, tournament_api=None):
         super().__init__()
         self._cluster = cluster
+        self._tournament_api = tournament_api
 
     def create(self, crunch: Crunch) -> dict:
         """No infrastructure to create — the CVM is already running."""
@@ -73,12 +74,25 @@ class PhalaModelBuilder(Builder):
         submission_id = model.code_submission_id
         logger.info("Submitting build to spawntee for submission_id=%s", submission_id)
 
+        storage_provider = None
+        storage_references = None
+        if self._tournament_api:
+            storage_info = self._tournament_api.load_storage_references(submission_id)
+            if storage_info and storage_info.get("provider") == "IRYS":
+                storage_provider = storage_info["provider"]
+                storage_references = storage_info.get("files")
+
         # Ensure the head CVM has capacity (provisions new runner if full)
         self._cluster.ensure_capacity()
         client = self._cluster.head_client()
 
         try:
-            result = client.build_model(submission_id, model_name=model.name)
+            result = client.build_model(
+                submission_id,
+                model_name=model.name,
+                storage_provider=storage_provider,
+                storage_references=storage_references,
+            )
         except SpawnteeClientError as e:
             logger.error("Failed to submit build for %s: %s", submission_id, e)
             raise
