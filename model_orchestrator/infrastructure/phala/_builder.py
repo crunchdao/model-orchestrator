@@ -80,7 +80,13 @@ class PhalaModelBuilder(Builder):
             storage_info = self._tournament_api.load_storage_references(submission_id)
             if storage_info and storage_info.get("provider") == "IRYS":
                 storage_provider = storage_info["provider"]
-                storage_references = storage_info.get("files")
+                files = storage_info.get("files")
+                if not isinstance(files, dict):
+                    raise TypeError(
+                        "Expected storage_references 'files' to be a dict, "
+                        "got %s: %r" % (type(files).__name__, files)
+                    )
+                storage_references = files
 
         # Ensure the head CVM has capacity (provisions new runner if full)
         self._cluster.ensure_capacity()
