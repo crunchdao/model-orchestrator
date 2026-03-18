@@ -1,5 +1,8 @@
+from __future__ import annotations
+
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from fastapi import FastAPI, Request, Depends, Query, HTTPException
 from fastapi.responses import PlainTextResponse, StreamingResponse
@@ -9,13 +12,18 @@ from ...mediators.models_state_mediator import ModelsStateMediator
 from ._types import *
 from ...utils.logging_utils import get_logger
 
+from ...infrastructure.phala._cluster import PhalaClusterError
+
+if TYPE_CHECKING:
+    from ...infrastructure.phala._cluster import PhalaCluster
+
 logger = get_logger()
 
 
 @dataclass
 class PhalaDeployServices:
     model_state_mediator: ModelsStateMediator
-    phala_cluster: object = field(default=None)
+    phala_cluster: PhalaCluster | None = field(default=None)
 
 
 def create_phala_deploy_api(services: PhalaDeployServices) -> FastAPI:
@@ -64,9 +72,9 @@ def create_phala_deploy_api(services: PhalaDeployServices) -> FastAPI:
 
         return items
 
-    @app.get("/models/logs/{type}/{task_id}")
+    @app.get("/models/logs/{log_type}/{task_id}")
     def stream_logs(
-        type: LogType,
+        log_type: LogType,
         task_id: str,
         follow: bool = Query(False),
         from_start: bool = Query(True),
@@ -77,13 +85,13 @@ def create_phala_deploy_api(services: PhalaDeployServices) -> FastAPI:
 
         try:
             client = svc.phala_cluster.client_for_task(task_id)
-        except Exception:
+        except PhalaClusterError:
             raise HTTPException(status_code=404, detail="Task %s not found in cluster routing" % task_id)
 
         try:
-            if type == LogType.builder:
+            if log_type == LogType.builder:
                 response = client.get_builder_logs(task_id, follow=follow, from_start=from_start, stream=follow)
-            elif type == LogType.runner:
+            elif log_type == LogType.runner:
                 response = client.get_runner_logs(task_id, follow=follow, from_start=from_start, stream=follow)
             else:
                 raise HTTPException(status_code=400, detail="Invalid log type")
@@ -93,7 +101,7 @@ def create_phala_deploy_api(services: PhalaDeployServices) -> FastAPI:
             error_msg = str(e)
             if "404" in error_msg:
                 raise HTTPException(status_code=404, detail="No logs found for task %s" % task_id)
-            logger.warning("Failed to fetch %s logs for task %s: %s", type.value, task_id, error_msg)
+            logger.warning("Failed to fetch %s logs for task %s: %s", log_type.value, task_id, error_msg)
             raise HTTPException(status_code=502, detail="Failed to fetch logs from CVM")
 
         media_type = "application/x-ndjson"
