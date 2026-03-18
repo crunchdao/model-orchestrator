@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from model_orchestrator.repositories.augmented_model_info_repository import AugmentedModelInfoRepository
+
 from ...entities import ModelRun
 from ...entities.crunch import Crunch
 from ...services import Builder
@@ -47,7 +49,7 @@ class PhalaModelBuilder(Builder):
     The orchestrator submits the build and then polls for completion.
     """
 
-    def __init__(self, cluster: PhalaCluster, tournament_api=None):
+    def __init__(self, cluster: PhalaCluster, tournament_api: AugmentedModelInfoRepository | None = None):
         super().__init__()
         self._cluster = cluster
         self._tournament_api = tournament_api
