@@ -12,6 +12,7 @@ from ...mediators.models_state_mediator import ModelsStateMediator
 from ._types import *
 from ...utils.logging_utils import get_logger
 
+from ...infrastructure.phala._client import SpawnteeClientError
 from ...infrastructure.phala._cluster import PhalaClusterError
 
 if TYPE_CHECKING:
@@ -95,13 +96,10 @@ def create_phala_deploy_api(services: PhalaDeployServices) -> FastAPI:
                 response = client.get_runner_logs(task_id, follow=follow, from_start=from_start, stream=follow)
             else:
                 raise HTTPException(status_code=400, detail="Invalid log type")
-        except HTTPException:
-            raise
-        except Exception as e:
-            error_msg = str(e)
-            if "404" in error_msg:
+        except SpawnteeClientError as e:
+            if e.status_code == 404:
                 raise HTTPException(status_code=404, detail="No logs found for task %s" % task_id)
-            logger.warning("Failed to fetch %s logs for task %s: %s", log_type.value, task_id, error_msg)
+            logger.warning("Failed to fetch %s logs for task %s: %s", log_type.value, task_id, e)
             raise HTTPException(status_code=502, detail="Failed to fetch logs from CVM")
 
         media_type = "application/x-ndjson"
