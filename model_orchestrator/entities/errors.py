@@ -1,8 +1,6 @@
 import json
 from enum import Enum
 
-NEW_RELIC_ALERT_FLAG = '[New Relic Alert]'
-
 
 class ErrorType(Enum):
     @property

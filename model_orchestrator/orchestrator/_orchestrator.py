@@ -64,7 +64,7 @@ class Orchestrator:
                 model_builder = AwsCodeBuildModelBuilder(runner_config)
 
                 from ..infrastructure.aws import AwsEcsModelRunner
-                model_runner = AwsEcsModelRunner()
+                model_runner = AwsEcsModelRunner(runner_config)
             elif runner_config.type == "local":
                 logger.info("Configuring Local builder and runner...")
 
