@@ -22,7 +22,7 @@ class TournamentApi(AugmentedModelInfoRepository):
 
     def fetch_user_mapping(self):
         url = f"{self.url}/v2/users/mapping"
-        get_logger().trace(f"Fetching user mapping from {url}")
+        get_logger().trace("Fetching user mapping from %s", url)
         response = requests.get(url)
         if response.status_code != 200:
             raise Exception(f"Failed to fetch data from API: {response.status_code} - {response.text}. URL: {url}")
@@ -34,7 +34,7 @@ class TournamentApi(AugmentedModelInfoRepository):
         url = f"{self.url}/v4/projects/~"
         result = {}
         for ids in batched(model_ids, self.CHUNK_SIZE):
-            get_logger().trace(f"Fetching user mapping from {url} for models %s", model_ids)
+            get_logger().trace("Fetching models from %s for model_ids %s", url, ids)
             response = requests.post(url, json=ids)
             if response.status_code != 200:
                 raise Exception(f"Failed to fetch data from API: {response.status_code} - {response.text}. URL: {url}")
@@ -49,6 +49,14 @@ class TournamentApi(AugmentedModelInfoRepository):
                     )
 
         return result
+
+    def load_storage_references(self, submission_id: str) -> dict | None:
+        url = f"{self.url}/v4/submissions/{submission_id}/storage"
+        response = requests.get(url)
+        if response.status_code == 404:
+            return None
+        response.raise_for_status()
+        return response.json()
 
     def _should_refresh_user_mapping(self) -> bool:
         """Determines if user mapping should be refreshed based on the interval."""
