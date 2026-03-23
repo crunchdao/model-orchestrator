@@ -261,6 +261,7 @@ class Orchestrator:
                     from ..infrastructure.http import create_phala_deploy_api, PhalaDeployServices
                     deploy_services = PhalaDeployServices(
                         model_state_mediator=self.model_state_mediator,
+                        phala_cluster=self.phala_cluster,
                     )
                     deploy_api = create_phala_deploy_api(deploy_services)
 
