@@ -101,7 +101,8 @@ class CrunchService:
                         gpus=crunch_config.infrastructure.gpu_config.gpus
                     ),
                     is_secure=crunch_config.infrastructure.is_secure,
-                    debug_grpc=crunch_config.infrastructure.debug_grpc
+                    debug_grpc=crunch_config.infrastructure.debug_grpc,
+                    sandbox_proxy_url=crunch_config.infrastructure.sandbox_proxy_url,
                 )
 
             if self.config.watcher.poller.type == "onchain" and not crunch_config.onchain_name:

@@ -86,6 +86,7 @@ class AwsEcsModelRunner(Runner):
                     {'name': 'COORDINATOR_WALLET_PUBKEY', 'value': (crunch.coordinator_info.wallet_pubkey if crunch.coordinator_info else '') or ''},
                     {'name': 'COORDINATOR_CERT_HASH', 'value': (crunch.coordinator_info.cert_hash if crunch.coordinator_info else '') or ''},
                     {'name': 'COORDINATOR_CERT_HASH_SECONDARY', 'value': (crunch.coordinator_info.cert_hash_secondary if crunch.coordinator_info else '') or ''},
+                    {'name': 'SANDBOX_PROXY_URL', 'value': crunch.infrastructure.sandbox_proxy_url or ''},
                 ] + ([
                          {'name': 'GRPC_TRACE', 'value': 'handshaker, security, tsi'},
                          {'name': 'GRPC_VERBOSITY', 'value': 'DEBUG'}

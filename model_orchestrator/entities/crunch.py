@@ -73,6 +73,7 @@ class Infrastructure:
 
     is_secure: bool = False
     debug_grpc: bool = False
+    sandbox_proxy_url: str | None = None
 
 
 @dataclass
