@@ -101,7 +101,7 @@ class CrunchService:
                         gpus=crunch_config.infrastructure.gpu_config.gpus
                     ),
                     is_secure=crunch_config.infrastructure.is_secure,
-                    runner_env=dict(crunch_config.infrastructure.runner_env),
+                    runner_envs=dict(crunch_config.infrastructure.runner_envs),
                 )
 
             if self.config.watcher.poller.type == "onchain" and not crunch_config.onchain_name:

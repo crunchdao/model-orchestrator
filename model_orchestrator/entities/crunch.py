@@ -72,7 +72,7 @@ class Infrastructure:
     GpuConfig = GpuConfig
 
     is_secure: bool = False
-    runner_env: dict[str, str] = field(default_factory=dict)
+    runner_envs: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -111,5 +111,5 @@ class Crunch:
             return ScheduleStatus.IN_SCHEDULE if self.run_schedule.is_allowed_now() else ScheduleStatus.OUT_OF_SCHEDULE
         return ScheduleStatus.NO_SCHEDULE
 
-    def resolve_runner_env(self) -> dict[str, str]:
-        return dict(self.infrastructure.runner_env)
+    def resolve_runner_envs(self) -> dict[str, str]:
+        return dict(self.infrastructure.runner_envs)
