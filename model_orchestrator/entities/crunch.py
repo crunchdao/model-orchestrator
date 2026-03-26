@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from zoneinfo import ZoneInfo
@@ -72,8 +72,7 @@ class Infrastructure:
     GpuConfig = GpuConfig
 
     is_secure: bool = False
-    debug_grpc: bool = False
-    sandbox_proxy_url: str | None = None
+    runner_env: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -111,3 +110,6 @@ class Crunch:
         if self.run_schedule:
             return ScheduleStatus.IN_SCHEDULE if self.run_schedule.is_allowed_now() else ScheduleStatus.OUT_OF_SCHEDULE
         return ScheduleStatus.NO_SCHEDULE
+
+    def resolve_runner_env(self) -> dict[str, str]:
+        return dict(self.infrastructure.runner_env)

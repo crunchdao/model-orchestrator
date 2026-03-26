@@ -25,8 +25,7 @@ class InfrastructureConfig(_BaseConfig):
     cpu_config: Optional[CpuConfig] = Field(None, description="CPU configuration")
     gpu_config: Optional[GpuConfig] = Field(None, description="GPU configuration")
     is_secure: bool = Field(False, description="Specifies whether the infrastructure setup uses a security model protocol.")
-    debug_grpc: bool = Field(False, description="Enables gRPC debug logging (GRPC_TRACE and GRPC_VERBOSITY).")
-    sandbox_proxy_url: str | None = Field(None, description="Gateway proxy URL for model internet access (e.g. http://host:8090)")
+    runner_env: Dict[str, str] = Field(default_factory=dict, description="Additional environment variables injected into runner containers. Passed as-is to the ECS task definition (e.g. GRPC_TRACE, GRPC_VERBOSITY, SANDBOX_PROXY_URL).")
 
 
 class RunScheduleConfig(_BaseConfig):
