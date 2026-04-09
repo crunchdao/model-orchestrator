@@ -86,10 +86,7 @@ class AwsEcsModelRunner(Runner):
                     {'name': 'COORDINATOR_WALLET_PUBKEY', 'value': (crunch.coordinator_info.wallet_pubkey if crunch.coordinator_info else '') or ''},
                     {'name': 'COORDINATOR_CERT_HASH', 'value': (crunch.coordinator_info.cert_hash if crunch.coordinator_info else '') or ''},
                     {'name': 'COORDINATOR_CERT_HASH_SECONDARY', 'value': (crunch.coordinator_info.cert_hash_secondary if crunch.coordinator_info else '') or ''},
-                ] + ([
-                         {'name': 'GRPC_TRACE', 'value': 'handshaker, security, tsi'},
-                         {'name': 'GRPC_VERBOSITY', 'value': 'DEBUG'}
-                     ] if crunch.infrastructure.debug_grpc else [])
+                ] + [{'name': k, 'value': v} for k, v in crunch.resolve_runner_envs().items()]
         )
 
         assign_public_ip = crunch.network_config.get(ASSIGN_PUBLIC_IP_KEY) if crunch.network_config else ASSIGN_PUBLIC_IP_DEFAULT

@@ -53,12 +53,12 @@ class SQLiteCrunchRepository(SQLiteRepository, CrunchRepository):
             self._add_column_if_not_exists(db, 'crunches', 'cluster_name', str)
             self._add_column_if_not_exists(db, 'crunches', 'onchain_name', str)
             self._add_column_if_not_exists(db, 'crunches', 'is_secure', bool)
-            self._add_column_if_not_exists(db, 'crunches', 'debug_grpc', bool)
             self._add_column_if_not_exists(db, 'crunches', 'onchain_address', str)
             self._add_column_if_not_exists(db, 'crunches', 'coordinator_wallet_pubkey', str)
             self._add_column_if_not_exists(db, 'crunches', 'coordinator_cert_hash', str)
             self._add_column_if_not_exists(db, 'crunches', 'coordinator_cert_hash_secondary', str)
             self._add_column_if_not_exists(db, 'crunches', 'is_active', bool, not_null_default=True)
+            self._add_column_if_not_exists(db, 'crunches', 'runner_envs', str)
 
     def save(self, crunch: Crunch):
         with self._open() as db:
@@ -70,7 +70,6 @@ class SQLiteCrunchRepository(SQLiteRepository, CrunchRepository):
                     "cluster_name": crunch.infrastructure.cluster_name,
                     "infra_zone": crunch.infrastructure.zone,
                     "is_secure": crunch.infrastructure.is_secure,
-                    "debug_grpc": crunch.infrastructure.debug_grpc,
                     "runner_type": crunch.infrastructure.runner_type.value,
                     "cpu_vcpus": crunch.infrastructure.cpu_config.vcpus if crunch.infrastructure.cpu_config else None,
                     "cpu_memory": crunch.infrastructure.cpu_config.memory if crunch.infrastructure.cpu_config else None,
@@ -89,6 +88,7 @@ class SQLiteCrunchRepository(SQLiteRepository, CrunchRepository):
                     "coordinator_cert_hash": crunch.coordinator_info.cert_hash if crunch.coordinator_info else None,
                     "coordinator_cert_hash_secondary": crunch.coordinator_info.cert_hash_secondary if crunch.coordinator_info else None,
                     "is_active": crunch.is_active,
+                    "runner_envs": json.dumps(crunch.infrastructure.runner_envs) if crunch.infrastructure.runner_envs else None,
                 },
                 pk="id"
             )
@@ -158,7 +158,6 @@ class SQLiteCrunchRepository(SQLiteRepository, CrunchRepository):
                 cluster_name=values["cluster_name"],
                 zone=values["infra_zone"],
                 is_secure=values["is_secure"],
-                debug_grpc=values.get("debug_grpc", False),
                 runner_type=RunnerType(values["runner_type"]),
                 cpu_config=CpuConfig(
                     vcpus=values["cpu_vcpus"],
@@ -170,7 +169,8 @@ class SQLiteCrunchRepository(SQLiteRepository, CrunchRepository):
                     memory=values["gpu_memory"],
                     instances_types=json.loads(values["gpu_instance_types"]) if values["gpu_instance_types"] else None,
                     gpus=values["gpus_per_instance"]
-                ) if values["gpu_vcpus"] is not None else None
+                ) if values["gpu_vcpus"] is not None else None,
+                runner_envs=json.loads(values["runner_envs"]) if values.get("runner_envs") else {},
             ),
             runner_config=json.loads(values["runner_config"]),
             network_config=json.loads(values["network_config"]),
