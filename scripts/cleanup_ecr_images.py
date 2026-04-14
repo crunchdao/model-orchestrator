@@ -65,7 +65,7 @@ def delete_ecr_images(submission_ids: list[str], repository: str, region: str, d
 def main():
     parser = argparse.ArgumentParser(description="Delete ECR images for a crunch's models")
     parser.add_argument("crunch_name", help="Crunch name to query from the database")
-    parser.add_argument("--db-path", default="data/orchestrator.db", help="Path to the SQLite database")
+    parser.add_argument("--db-path", default="/app/data/orchestrator.db", help="Path to the SQLite database")
     parser.add_argument("--ecr-repository", default=ECR_REPOSITORY)
     parser.add_argument("--ecr-region", default=ECR_REGION)
     parser.add_argument("--dry-run", action="store_true", help="List images without deleting")

@@ -82,7 +82,7 @@ def stop_services(models: list[dict], dry_run: bool):
 def main():
     parser = argparse.ArgumentParser(description="Stop all running ECS services for a crunch")
     parser.add_argument("crunch_name", help="Name of the crunch")
-    parser.add_argument("--db-path", default="data/orchestrator.db", help="Path to the SQLite database")
+    parser.add_argument("--db-path", default="/app/data/orchestrator.db", help="Path to the SQLite database")
     parser.add_argument("--dry-run", action="store_true", help="List services without stopping")
     args = parser.parse_args()
 
