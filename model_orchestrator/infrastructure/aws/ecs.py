@@ -303,7 +303,7 @@ class AwsEcsRunner:
         family_name,
         container_name,
         docker_image,
-        vcpus: int,
+        vcpus: float,
         memory: int,
         job_type: JobType,
         gpu_count=None,

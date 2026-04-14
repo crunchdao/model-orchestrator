@@ -7,13 +7,13 @@ from ._base import BaseConfig as _BaseConfig
 
 
 class CpuConfig(_BaseConfig):
-    vcpus: int = Field(..., description="Number of virtual CPUs")
+    vcpus: float = Field(..., description="Number of virtual CPUs")
     memory: int = Field(..., description="Memory in MB")
     instances_types: Optional[List[str]] = Field(None, description="List of instance types")
 
 
 class GpuConfig(_BaseConfig):
-    vcpus: int = Field(..., description="Number of virtual CPUs")
+    vcpus: float = Field(..., description="Number of virtual CPUs")
     memory: int = Field(..., description="Memory in MB")
     instances_types: Optional[List[str]] = Field(None, description="List of instance types")
     gpus: int = Field(..., description="Number of GPUs")

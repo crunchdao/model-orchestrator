@@ -15,7 +15,7 @@ class RunnerType(Enum):
 
 @dataclass(kw_only=True)
 class HardwareConfig:
-    vcpus: int
+    vcpus: float
     memory: int
     instances_types: list[str] | None = None
 
