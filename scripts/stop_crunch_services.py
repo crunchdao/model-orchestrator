@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """
-Stop all running ECS services for a given crunch by reading active models from the database.
-The orchestrator will automatically restart them with the latest config.
+Stop ECS services and delete active model runs for a given crunch.
+The orchestrator must be stopped before running this script.
+On restart, it will re-deploy models from config.
 
 Usage:
-    python scripts/stop_crunch_services.py <crunch_name> [--db-path data/orchestrator.db] [--dry-run]
+    docker compose stop
+    docker exec -it <container> python /app/scripts/stop_crunch_services.py <crunch_name> [--dry-run]
+    docker compose start
 """
 
 import argparse
@@ -38,7 +41,7 @@ def parse_runner_info(raw: str) -> dict:
     return eval(raw)
 
 
-def stop_services(models: list[dict], dry_run: bool):
+def stop_services(models: list[dict], dry_run: bool) -> int:
     ecs_clients: dict[str, boto3.client] = {}
     stopped = 0
 
@@ -52,7 +55,7 @@ def stop_services(models: list[dict], dry_run: bool):
             continue
 
         if dry_run:
-            print(f"  [dry-run] would stop {service_name} (cluster={cluster_name}, status={model['runner_status']})")
+            print(f"  [dry-run] would stop {service_name} (cluster={cluster_name})")
             continue
 
         region = runner_info.get("region")
@@ -67,7 +70,7 @@ def stop_services(models: list[dict], dry_run: bool):
                 service=service_name,
                 desiredCount=0,
             )
-            print(f"  [stopped] {service_name} (cluster={cluster_name})")
+            print(f"  [stopped] {service_name}")
             stopped += 1
         except ClientError as e:
             error_code = e.response["Error"]["Code"]
@@ -79,11 +82,22 @@ def stop_services(models: list[dict], dry_run: bool):
     return stopped
 
 
+def delete_model_runs(db_path: str, models: list[dict], dry_run: bool):
+    if dry_run:
+        print(f"  [dry-run] would delete {len(models)} active model run(s)")
+        return
+
+    db = sqlite_utils.Database(db_path)
+    for model in models:
+        db.execute("DELETE FROM model_runs WHERE id = ?", [model["id"]])
+    print(f"  Deleted {len(models)} active model run(s)")
+
+
 def main():
-    parser = argparse.ArgumentParser(description="Stop all running ECS services for a crunch")
+    parser = argparse.ArgumentParser(description="Stop ECS services and delete active model runs for a crunch")
     parser.add_argument("crunch_name", help="Name of the crunch")
     parser.add_argument("--db-path", default="/app/data/orchestrator.db", help="Path to the SQLite database")
-    parser.add_argument("--dry-run", action="store_true", help="List services without stopping")
+    parser.add_argument("--dry-run", action="store_true", help="Show what would happen without doing it")
     args = parser.parse_args()
 
     models = load_active_models(args.db_path, args.crunch_name)
@@ -98,11 +112,14 @@ def main():
         service_name = runner_info.get("service_name", m["runner_job_id"])
         print(f"  - {m['model_id']} ({service_name}) [{m['runner_status']}]")
 
-    print()
-    stopped = stop_services(models, args.dry_run)
+    print("\n--- Stopping ECS services ---")
+    stop_services(models, args.dry_run)
+
+    print("\n--- Deleting active model runs from DB ---")
+    delete_model_runs(args.db_path, models, args.dry_run)
 
     if not args.dry_run:
-        print(f"\nStopped {stopped}/{len(models)} service(s). The orchestrator will restart them with the latest config.")
+        print("\nDone. Restart the orchestrator to re-deploy with the latest config.")
 
 
 if __name__ == "__main__":

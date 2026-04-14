@@ -3,7 +3,7 @@
 Fetch models from the local SQLite database for a given crunch name and delete their Docker images from ECR.
 
 Usage:
-    python scripts/cleanup_ecr_images.py <crunch_name> [--db-path data/orchestrator.db] [--dry-run]
+    docker exec -it <container> python /app/scripts/cleanup_ecr_images.py <crunch_name> [--dry-run]
 """
 
 import argparse
