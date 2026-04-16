@@ -54,6 +54,8 @@ class LocalModelRunner(Runner):
         except docker.errors.NotFound:
             get_logger().debug("No existing container with name %s found, proceeding to create a new one.", container_name)
 
+        environment = dict(crunch.resolve_runner_envs())
+
         container = self._docker_client.containers.run(
             image=model.docker_image,
             name=container_name,
@@ -61,6 +63,7 @@ class LocalModelRunner(Runner):
             ports={RPC_PORT: find_free_port()},
             # remove=True,
             network=network_name,
+            environment=environment,
         )
 
         logs_arn = None  # unsupported
