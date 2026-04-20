@@ -94,7 +94,7 @@ class PhalaModelBuilder(Builder):
         # docker_image is a placeholder; the actual image is inside the TEE.
         # The task_id is used later by start-model to reference the built image.
         docker_image = f"phala-tee://{submission_id}"
-        logs_arn = None  # Logs live inside the TEE, not in CloudWatch
+        logs_arn = f"/models/logs/builder/{task_id}"
         return task_id, docker_image, logs_arn
 
     def is_built(self, model: ModelRun, crunch: Crunch) -> tuple[bool, str]:
