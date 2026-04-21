@@ -464,6 +464,9 @@ class AwsEcsRunner:
             "deploymentConfiguration": deployment_configuration,
         }
 
+        if use_ec2:
+            common_args["placementStrategy"] = [{'type': 'binpack', 'field': 'memory'}]
+
         if placement_constraints:
             common_args["placementConstraints"] = placement_constraints
 
