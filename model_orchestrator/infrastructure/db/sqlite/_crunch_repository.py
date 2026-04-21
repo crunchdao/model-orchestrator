@@ -4,7 +4,7 @@ from zoneinfo import ZoneInfo
 from model_orchestrator.utils.logging_utils import get_logger
 
 from ....entities import (CpuConfig, Crunch, GpuConfig, Infrastructure,
-                          RunnerType)
+                          LaunchType, RunnerType)
 from ....entities.crunch import RunSchedule, CoordinatorInfo
 from ....repositories import CrunchRepository
 from ._base import SQLiteRepository
@@ -59,6 +59,9 @@ class SQLiteCrunchRepository(SQLiteRepository, CrunchRepository):
             self._add_column_if_not_exists(db, 'crunches', 'coordinator_cert_hash_secondary', str)
             self._add_column_if_not_exists(db, 'crunches', 'is_active', bool, not_null_default=True)
             self._add_column_if_not_exists(db, 'crunches', 'runner_envs', str)
+            self._add_column_if_not_exists(db, 'crunches', 'launch_type', str)
+            self._add_column_if_not_exists(db, 'crunches', 'cpu_memory_reservation', int)
+            self._add_column_if_not_exists(db, 'crunches', 'gpu_memory_reservation', int)
 
     def save(self, crunch: Crunch):
         with self._open() as db:
@@ -71,11 +74,14 @@ class SQLiteCrunchRepository(SQLiteRepository, CrunchRepository):
                     "infra_zone": crunch.infrastructure.zone,
                     "is_secure": crunch.infrastructure.is_secure,
                     "runner_type": crunch.infrastructure.runner_type.value,
+                    "launch_type": crunch.infrastructure.launch_type.value,
                     "cpu_vcpus": crunch.infrastructure.cpu_config.vcpus if crunch.infrastructure.cpu_config else None,
                     "cpu_memory": crunch.infrastructure.cpu_config.memory if crunch.infrastructure.cpu_config else None,
+                    "cpu_memory_reservation": crunch.infrastructure.cpu_config.memory_reservation if crunch.infrastructure.cpu_config else None,
                     "cpu_instance_types": json.dumps(crunch.infrastructure.cpu_config.instances_types) if crunch.infrastructure.cpu_config else None,
                     "gpu_vcpus": crunch.infrastructure.gpu_config.vcpus if crunch.infrastructure.gpu_config else None,
                     "gpu_memory": crunch.infrastructure.gpu_config.memory if crunch.infrastructure.gpu_config else None,
+                    "gpu_memory_reservation": crunch.infrastructure.gpu_config.memory_reservation if crunch.infrastructure.gpu_config else None,
                     "gpu_instance_types": json.dumps(crunch.infrastructure.gpu_config.instances_types) if crunch.infrastructure.gpu_config else None,
                     "gpus_per_instance": crunch.infrastructure.gpu_config.gpus if crunch.infrastructure.gpu_config else None,
                     "runner_config": json.dumps(crunch.runner_config),
@@ -159,14 +165,17 @@ class SQLiteCrunchRepository(SQLiteRepository, CrunchRepository):
                 zone=values["infra_zone"],
                 is_secure=values["is_secure"],
                 runner_type=RunnerType(values["runner_type"]),
+                launch_type=LaunchType(values["launch_type"]) if values.get("launch_type") else LaunchType.FARGATE,
                 cpu_config=CpuConfig(
                     vcpus=values["cpu_vcpus"],
                     memory=values["cpu_memory"],
+                    memory_reservation=values.get("cpu_memory_reservation"),
                     instances_types=json.loads(values["cpu_instance_types"]) if values["cpu_instance_types"] else None
                 ) if values["cpu_vcpus"] is not None else None,
                 gpu_config=GpuConfig(
                     vcpus=values["gpu_vcpus"],
                     memory=values["gpu_memory"],
+                    memory_reservation=values.get("gpu_memory_reservation"),
                     instances_types=json.loads(values["gpu_instance_types"]) if values["gpu_instance_types"] else None,
                     gpus=values["gpus_per_instance"]
                 ) if values["gpu_vcpus"] is not None else None,

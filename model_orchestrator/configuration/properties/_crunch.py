@@ -8,13 +8,15 @@ from ._base import BaseConfig as _BaseConfig
 
 class CpuConfig(_BaseConfig):
     vcpus: float = Field(..., description="Number of virtual CPUs")
-    memory: int = Field(..., description="Memory in MB")
+    memory: int = Field(..., description="Memory in MB (hard limit - container killed if exceeded)")
+    memory_reservation: Optional[int] = Field(None, description="Memory soft limit in MB (used for EC2 placement, container can burst beyond). If not set, memory is used for both placement and hard limit (Fargate behavior).")
     instances_types: Optional[List[str]] = Field(None, description="List of instance types")
 
 
 class GpuConfig(_BaseConfig):
     vcpus: float = Field(..., description="Number of virtual CPUs")
-    memory: int = Field(..., description="Memory in MB")
+    memory: int = Field(..., description="Memory in MB (hard limit - container killed if exceeded)")
+    memory_reservation: Optional[int] = Field(None, description="Memory soft limit in MB (used for EC2 placement, container can burst beyond). If not set, memory is used for both placement and hard limit (Fargate behavior).")
     instances_types: Optional[List[str]] = Field(None, description="List of instance types")
     gpus: int = Field(..., description="Number of GPUs")
 
@@ -22,6 +24,7 @@ class GpuConfig(_BaseConfig):
 class InfrastructureConfig(_BaseConfig):
     cluster_name: Optional[str] = Field(None, description="AWS cluster name")
     zone: str = Field(..., description="AWS zone or region")
+    launch_type: str = Field("FARGATE", description="ECS launch type: FARGATE or EC2. EC2 enables soft memory limits (memory_reservation) and bin-packing across shared instances.")
     cpu_config: Optional[CpuConfig] = Field(None, description="CPU configuration")
     gpu_config: Optional[GpuConfig] = Field(None, description="GPU configuration")
     is_secure: bool = Field(False, description="Specifies whether the infrastructure setup uses a security model protocol.")

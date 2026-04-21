@@ -17,6 +17,7 @@ class RunnerType(Enum):
 class HardwareConfig:
     vcpus: float
     memory: int
+    memory_reservation: int | None = None
     instances_types: list[str] | None = None
 
 
@@ -58,6 +59,11 @@ class RunSchedule:
         return self.__str__()
 
 
+class LaunchType(Enum):
+    FARGATE = "FARGATE"
+    EC2 = "EC2"
+
+
 @dataclass
 class Infrastructure:
     cluster_name: str | None
@@ -70,7 +76,9 @@ class Infrastructure:
     HardwareConfig = HardwareConfig
     CpuConfig = CpuConfig
     GpuConfig = GpuConfig
+    LaunchType = LaunchType
 
+    launch_type: LaunchType = LaunchType.FARGATE
     is_secure: bool = False
     runner_envs: dict[str, str] = field(default_factory=dict)
 

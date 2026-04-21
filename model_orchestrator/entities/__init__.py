@@ -3,6 +3,7 @@ from .crunch import Crunch as Crunch
 from .crunch import GpuConfig as GpuConfig
 from .crunch import HardwareConfig as HardwareConfig
 from .crunch import Infrastructure as Infrastructure
+from .crunch import LaunchType as LaunchType
 from .crunch import RunnerType as RunnerType
 from .model_run import ModelRun as ModelRun
 from .model_run import CruncherOnchainInfo as CruncherOnchainInfo

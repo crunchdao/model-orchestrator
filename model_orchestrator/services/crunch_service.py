@@ -3,7 +3,7 @@ from model_orchestrator.repositories.crunch_repository import CrunchRepository
 from model_orchestrator.services import Builder, Runner
 from model_orchestrator.utils.logging_utils import get_logger
 
-from ..entities import CpuConfig, Crunch, GpuConfig, Infrastructure, RunnerType, ModelRun
+from ..entities import CpuConfig, Crunch, GpuConfig, Infrastructure, LaunchType, RunnerType, ModelRun
 from ..entities.crunch import RunSchedule, ScheduleStatus, CoordinatorInfo
 from ..infrastructure.config_watcher import ModelStateConfigPolling, ModelStateConfigOnChainPolling
 from model_orchestrator.infrastructure.config_watcher import ModelStateConfigOnChain
@@ -89,14 +89,17 @@ class CrunchService:
                     cluster_name=crunch_config.infrastructure.cluster_name,
                     zone=crunch_config.infrastructure.zone,
                     runner_type=runner_type,
+                    launch_type=LaunchType(crunch_config.infrastructure.launch_type),
                     cpu_config=CpuConfig(
                         vcpus=crunch_config.infrastructure.cpu_config.vcpus,
                         memory=crunch_config.infrastructure.cpu_config.memory,
+                        memory_reservation=crunch_config.infrastructure.cpu_config.memory_reservation,
                         instances_types=crunch_config.infrastructure.cpu_config.instances_types
                     ),
                     gpu_config=GpuConfig(
                         vcpus=crunch_config.infrastructure.gpu_config.vcpus,
                         memory=crunch_config.infrastructure.gpu_config.memory,
+                        memory_reservation=crunch_config.infrastructure.gpu_config.memory_reservation,
                         instances_types=crunch_config.infrastructure.gpu_config.instances_types,
                         gpus=crunch_config.infrastructure.gpu_config.gpus
                     ),

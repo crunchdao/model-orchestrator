@@ -6,7 +6,7 @@ from typing import Any, TypedDict
 import boto3
 from botocore.config import Config
 from botocore.exceptions import ClientError
-from model_orchestrator.entities import Crunch, Infrastructure, ModelRun
+from model_orchestrator.entities import Crunch, Infrastructure, LaunchType, ModelRun
 from model_orchestrator.services import Runner
 from model_orchestrator.utils.compat import batched
 from model_orchestrator.utils.logging_utils import get_logger
@@ -66,15 +66,19 @@ class AwsEcsModelRunner(Runner):
         image_uri = f'{crunch.builder_config["ecr_image_uri"]}:{model.docker_image.split(":")[-1]}'
 
         infrastructure_config = crunch.infrastructure
+        launch_type = infrastructure_config.launch_type
 
         is_gpu = job_type == AwsEcsRunner.JobType.GPU
+        hw_config = infrastructure_config.gpu_config if is_gpu else infrastructure_config.cpu_config
         task_definition_arn, logs_prefix_arn = aws_ecs.register_task_definition(
             family_name=cluster_name,
             container_name=model.docker_image,
             docker_image=image_uri,
             job_type=job_type,
-            vcpus=infrastructure_config.gpu_config.vcpus if is_gpu else infrastructure_config.cpu_config.vcpus,
-            memory=infrastructure_config.gpu_config.memory if is_gpu else infrastructure_config.cpu_config.memory,
+            launch_type=launch_type,
+            vcpus=hw_config.vcpus,
+            memory=hw_config.memory,
+            memory_reservation=hw_config.memory_reservation,
             gpu_count=infrastructure_config.gpu_config.gpus if is_gpu else None,
             execution_role_arn=task_execution_role_arn,
             env=[
@@ -100,6 +104,7 @@ class AwsEcsModelRunner(Runner):
             subnets=subnets,
             security_groups=security_groups,
             job_type=job_type,
+            launch_type=launch_type,
             instance_type=(crunch.infrastructure.gpu_config.instances_types[0] if is_gpu else None),  # type: ignore
             assign_public_ip=assign_public_ip,
             tags={
@@ -252,6 +257,15 @@ class AwsEcsRunner:
         # Adaptive retry mode handles throttling with exponential backoff
         retry_config = Config(retries={'max_attempts': 10, 'mode': 'adaptive'})
         self.ecs_client = boto3.client('ecs', region_name=region, config=retry_config)
+        self._capacity_provider_cache: dict[str, str | None] = {}
+
+    def get_capacity_provider(self, cluster_name: str) -> str | None:
+        """Get the first capacity provider for a cluster (cached)."""
+        if cluster_name not in self._capacity_provider_cache:
+            response = self.ecs_client.describe_clusters(clusters=[cluster_name])
+            providers = response.get('clusters', [{}])[0].get('capacityProviders', [])
+            self._capacity_provider_cache[cluster_name] = providers[0] if providers else None
+        return self._capacity_provider_cache[cluster_name]
 
     def cluster_exists(self, cluster_name):
         """Check if an ECS cluster exists."""
@@ -306,9 +320,11 @@ class AwsEcsRunner:
         vcpus: float,
         memory: int,
         job_type: JobType,
+        launch_type: 'LaunchType' = None,
         gpu_count=None,
         execution_role_arn=None,
-        env=None
+        env=None,
+        memory_reservation: int | None = None,
     ):
         """
         Registers a new task definition only if there are changes
@@ -322,40 +338,51 @@ class AwsEcsRunner:
         stream_prefix = family_name
         container_name = container_name.replace(':', '--')
 
-        new_task_def_config = {
-            "containerDefinitions": [
+        use_ec2 = launch_type == LaunchType.EC2
+
+        container_def = {
+            'name': container_name,
+            'image': docker_image,
+            'portMappings': [
                 {
-                    'name': container_name,
-                    'image': docker_image,
-                    'portMappings': [
-                        {
-                            'containerPort': RPC_PORT,
-                            'hostPort': RPC_PORT,
-                            'protocol': 'tcp',
-                            'name': 'grpc',
-                            'appProtocol': 'grpc',
-                        },
-                    ],
-                    'privileged': False,
-                    'logConfiguration': {
-                        'logDriver': 'awslogs',
-                        'options': {
-                            'awslogs-group': log_group,
-                            'awslogs-region': self.region,
-                            'awslogs-stream-prefix': stream_prefix,
-                        }
-                    },
-                    'essential': True,
-                    'resourceRequirements': [{'value': str(gpu_count), 'type': 'GPU'}] if job_type == self.JobType.GPU and gpu_count is not None else [],
-                    'environment': env or [],
-                }
+                    'containerPort': RPC_PORT,
+                    'hostPort': RPC_PORT,
+                    'protocol': 'tcp',
+                    'name': 'grpc',
+                    'appProtocol': 'grpc',
+                },
             ],
-            "networkMode": 'awsvpc',
-            "requiresCompatibilities": ['FARGATE'] if job_type == self.JobType.CPU else ['EC2'],
-            "executionRoleArn": execution_role_arn,
-            "memory": str(memory),
-            "cpu": str(cpu_units),
+            'privileged': False,
+            'logConfiguration': {
+                'logDriver': 'awslogs',
+                'options': {
+                    'awslogs-group': log_group,
+                    'awslogs-region': self.region,
+                    'awslogs-stream-prefix': stream_prefix,
+                }
+            },
+            'essential': True,
+            'resourceRequirements': [{'value': str(gpu_count), 'type': 'GPU'}] if job_type == self.JobType.GPU and gpu_count is not None else [],
+            'environment': env or [],
         }
+
+        if use_ec2 and memory_reservation is not None:
+            # EC2 soft limits: memoryReservation for placement, memory as hard cap
+            container_def['memoryReservation'] = memory_reservation
+            container_def['memory'] = memory
+            container_def['cpu'] = cpu_units
+
+        new_task_def_config = {
+            "containerDefinitions": [container_def],
+            "networkMode": 'awsvpc',
+            "requiresCompatibilities": ['EC2'] if use_ec2 else ['FARGATE'],
+            "executionRoleArn": execution_role_arn,
+        }
+
+        if not use_ec2:
+            # Fargate requires task-level cpu and memory
+            new_task_def_config["memory"] = str(memory)
+            new_task_def_config["cpu"] = str(cpu_units)
 
         family_name = f"{family_name}--{container_name}"
         # Fetch the latest task definition, if it exists
@@ -370,11 +397,13 @@ class AwsEcsRunner:
         response = self.ecs_client.register_task_definition(
             family=family_name,
             containerDefinitions=new_task_def_config['containerDefinitions'],
-            cpu=new_task_def_config['cpu'],
-            memory=new_task_def_config['memory'],
             executionRoleArn=new_task_def_config['executionRoleArn'],
             networkMode=new_task_def_config['networkMode'],
-            requiresCompatibilities=new_task_def_config['requiresCompatibilities']
+            requiresCompatibilities=new_task_def_config['requiresCompatibilities'],
+            **({
+                'cpu': new_task_def_config['cpu'],
+                'memory': new_task_def_config['memory'],
+            } if not use_ec2 else {})
         )
 
         logs_prefix_arn = f'arn:aws:ecs:{self.region}:{boto3.client("sts").get_caller_identity()["Account"]}:log-group:{log_group}:log-stream:{stream_prefix}/{container_name}'
@@ -391,18 +420,27 @@ class AwsEcsRunner:
         subnets: list[str],
         security_groups: list[str],
         job_type: JobType,
+        launch_type: 'LaunchType' = None,
         instance_type: str | None,
         assign_public_ip: bool,
         tags: dict[str, str]
     ) -> _ServiceName:
         """Create an ECS service with desired count of 1. Services auto-restart tasks on failures or AWS maintenance."""
 
+        use_ec2 = launch_type == LaunchType.EC2
+
+        awsvpc_config = {
+            'subnets': subnets,
+            'securityGroups': security_groups,
+        }
+
+        # assignPublicIp is only supported for Fargate.
+        # For EC2, public IPs come from the subnet's auto-assign public IP setting.
+        if not use_ec2:
+            awsvpc_config['assignPublicIp'] = 'ENABLED' if assign_public_ip else 'DISABLED'
+
         network_configuration = {
-            'awsvpcConfiguration': {
-                'subnets': subnets,
-                'securityGroups': security_groups,
-                'assignPublicIp': 'ENABLED' if assign_public_ip else 'DISABLED',
-            }
+            'awsvpcConfiguration': awsvpc_config
         }
 
         deployment_configuration = {
@@ -443,14 +481,22 @@ class AwsEcsRunner:
                 waiter.wait(cluster=cluster_name, services=[service_name])
 
             aws_tags = [{'key': k, 'value': v} for k, v in tags.items()]
-            self.ecs_client.create_service(
-                serviceName=service_name,
-                launchType='FARGATE' if job_type == self.JobType.CPU else 'EC2',
-                tags=aws_tags,
-                enableECSManagedTags=True,
-                propagateTags="SERVICE",
+            create_args = {
+                'serviceName': service_name,
+                'tags': aws_tags,
+                'enableECSManagedTags': True,
+                'propagateTags': "SERVICE",
                 **common_args
-            )
+            }
+
+            if use_ec2:
+                capacity_provider = self.get_capacity_provider(cluster_name)
+                if capacity_provider:
+                    create_args['capacityProviderStrategy'] = [{'capacityProvider': capacity_provider, 'weight': 1}]
+            else:
+                create_args['launchType'] = 'FARGATE' if job_type == self.JobType.CPU else 'EC2'
+
+            self.ecs_client.create_service(**create_args)
             get_logger().debug(f"Created Service: {service_name}")
         return service_name
 
