@@ -578,6 +578,7 @@ class AwsEcsRunner:
         Returns aggregated list of service descriptions.
         """
         all_services = []
+        service_names = list(dict.fromkeys(service_names))
         for chunk in batched(service_names, chunk_size):
             try:
                 response = self.ecs_client.describe_services(
