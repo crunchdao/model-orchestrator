@@ -383,7 +383,8 @@ class AwsEcsRunner:
         }
 
         new_task_def_config["cpu"] = str(cpu_units)
-        new_task_def_config["memory"] = str(memory)
+        if not use_ec2:
+            new_task_def_config["memory"] = str(memory)
 
         family_name = f"{family_name}--{container_name}"
         # Fetch the latest task definition, if it exists
@@ -397,12 +398,7 @@ class AwsEcsRunner:
         # Register a new task definition if changes are detected
         response = self.ecs_client.register_task_definition(
             family=family_name,
-            containerDefinitions=new_task_def_config['containerDefinitions'],
-            executionRoleArn=new_task_def_config['executionRoleArn'],
-            networkMode=new_task_def_config['networkMode'],
-            requiresCompatibilities=new_task_def_config['requiresCompatibilities'],
-            cpu=new_task_def_config['cpu'],
-            memory=new_task_def_config['memory'],
+            **new_task_def_config,
         )
 
         logs_prefix_arn = f'arn:aws:ecs:{self.region}:{boto3.client("sts").get_caller_identity()["Account"]}:log-group:{log_group}:log-stream:{stream_prefix}/{container_name}'
