@@ -382,8 +382,9 @@ class AwsEcsRunner:
             "executionRoleArn": execution_role_arn,
         }
 
-        new_task_def_config["cpu"] = str(cpu_units)
         if not use_ec2:
+            # Fargate requires task-level cpu and memory
+            new_task_def_config["cpu"] = str(cpu_units)
             new_task_def_config["memory"] = str(memory)
 
         family_name = f"{family_name}--{container_name}"
