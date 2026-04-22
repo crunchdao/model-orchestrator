@@ -92,12 +92,14 @@ class CrunchService:
                     launch_type=LaunchType(crunch_config.infrastructure.launch_type),
                     cpu_config=CpuConfig(
                         vcpus=crunch_config.infrastructure.cpu_config.vcpus,
+                        vcpus_reservation=crunch_config.infrastructure.cpu_config.vcpus_reservation,
                         memory=crunch_config.infrastructure.cpu_config.memory,
                         memory_reservation=crunch_config.infrastructure.cpu_config.memory_reservation,
                         instances_types=crunch_config.infrastructure.cpu_config.instances_types
                     ),
                     gpu_config=GpuConfig(
                         vcpus=crunch_config.infrastructure.gpu_config.vcpus,
+                        vcpus_reservation=crunch_config.infrastructure.gpu_config.vcpus_reservation,
                         memory=crunch_config.infrastructure.gpu_config.memory,
                         memory_reservation=crunch_config.infrastructure.gpu_config.memory_reservation,
                         instances_types=crunch_config.infrastructure.gpu_config.instances_types,

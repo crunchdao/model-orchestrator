@@ -77,6 +77,7 @@ class AwsEcsModelRunner(Runner):
             job_type=job_type,
             launch_type=launch_type,
             vcpus=hw_config.vcpus,
+            vcpus_reservation=hw_config.vcpus_reservation,
             memory=hw_config.memory,
             memory_reservation=hw_config.memory_reservation,
             gpu_count=infrastructure_config.gpu_config.gpus if is_gpu else None,
@@ -321,6 +322,7 @@ class AwsEcsRunner:
         memory: int,
         job_type: JobType,
         launch_type: 'LaunchType' = None,
+        vcpus_reservation: float | None = None,
         gpu_count=None,
         execution_role_arn=None,
         env=None,
@@ -370,7 +372,8 @@ class AwsEcsRunner:
             # EC2 soft limits: memoryReservation for placement, memory as hard cap
             container_def['memoryReservation'] = memory_reservation
             container_def['memory'] = memory
-            container_def['cpu'] = cpu_units
+            # Container-level cpu = reservation (shares) for placement
+            container_def['cpu'] = int((vcpus_reservation or vcpus) * 1024)
 
         new_task_def_config = {
             "containerDefinitions": [container_def],
@@ -379,7 +382,10 @@ class AwsEcsRunner:
             "executionRoleArn": execution_role_arn,
         }
 
-        if not use_ec2:
+        if use_ec2:
+            # EC2: task-level cpu enables cgroup hard limit
+            new_task_def_config["cpu"] = str(cpu_units)
+        else:
             # Fargate requires task-level cpu and memory
             new_task_def_config["memory"] = str(memory)
             new_task_def_config["cpu"] = str(cpu_units)

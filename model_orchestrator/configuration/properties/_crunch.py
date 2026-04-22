@@ -7,14 +7,16 @@ from ._base import BaseConfig as _BaseConfig
 
 
 class CpuConfig(_BaseConfig):
-    vcpus: float = Field(..., description="Number of virtual CPUs")
+    vcpus: float = Field(..., description="Number of virtual CPUs (hard limit for EC2, allocation for Fargate)")
+    vcpus_reservation: Optional[float] = Field(None, description="CPU soft limit in vCPUs (used for EC2 placement). If not set, vcpus is used for both placement and hard limit.")
     memory: int = Field(..., description="Memory in MB (hard limit - container killed if exceeded)")
     memory_reservation: Optional[int] = Field(None, description="Memory soft limit in MB (used for EC2 placement, container can burst beyond). If not set, memory is used for both placement and hard limit (Fargate behavior).")
     instances_types: Optional[List[str]] = Field(None, description="List of instance types")
 
 
 class GpuConfig(_BaseConfig):
-    vcpus: float = Field(..., description="Number of virtual CPUs")
+    vcpus: float = Field(..., description="Number of virtual CPUs (hard limit for EC2, allocation for Fargate)")
+    vcpus_reservation: Optional[float] = Field(None, description="CPU soft limit in vCPUs (used for EC2 placement). If not set, vcpus is used for both placement and hard limit.")
     memory: int = Field(..., description="Memory in MB (hard limit - container killed if exceeded)")
     memory_reservation: Optional[int] = Field(None, description="Memory soft limit in MB (used for EC2 placement, container can burst beyond). If not set, memory is used for both placement and hard limit (Fargate behavior).")
     instances_types: Optional[List[str]] = Field(None, description="List of instance types")
