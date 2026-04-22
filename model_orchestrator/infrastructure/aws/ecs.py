@@ -382,13 +382,8 @@ class AwsEcsRunner:
             "executionRoleArn": execution_role_arn,
         }
 
-        if use_ec2:
-            # EC2: task-level cpu enables cgroup hard limit
-            new_task_def_config["cpu"] = str(cpu_units)
-        else:
-            # Fargate requires task-level cpu and memory
-            new_task_def_config["memory"] = str(memory)
-            new_task_def_config["cpu"] = str(cpu_units)
+        new_task_def_config["cpu"] = str(cpu_units)
+        new_task_def_config["memory"] = str(memory)
 
         family_name = f"{family_name}--{container_name}"
         # Fetch the latest task definition, if it exists
@@ -406,10 +401,8 @@ class AwsEcsRunner:
             executionRoleArn=new_task_def_config['executionRoleArn'],
             networkMode=new_task_def_config['networkMode'],
             requiresCompatibilities=new_task_def_config['requiresCompatibilities'],
-            **({
-                'cpu': new_task_def_config['cpu'],
-                'memory': new_task_def_config['memory'],
-            } if not use_ec2 else {})
+            cpu=new_task_def_config['cpu'],
+            memory=new_task_def_config['memory'],
         )
 
         logs_prefix_arn = f'arn:aws:ecs:{self.region}:{boto3.client("sts").get_caller_identity()["Account"]}:log-group:{log_group}:log-stream:{stream_prefix}/{container_name}'
