@@ -81,9 +81,20 @@ class CrunchService:
                     gpu_config=None
                 )
             else:
-                # For AWS runner, require full infrastructure config
-                if not crunch_config.infrastructure.cpu_config or not crunch_config.infrastructure.gpu_config:
-                    raise ValueError(f"AWS runner requires full infrastructure configuration for crunch {crunch_config.id}")
+                # For AWS runner, require at least cpu config
+                if not crunch_config.infrastructure.cpu_config:
+                    raise ValueError(f"AWS runner requires at least cpu configuration for crunch {crunch_config.id}")
+
+                gpu_config = None
+                if crunch_config.infrastructure.gpu_config:
+                    gpu_config = GpuConfig(
+                        vcpus=crunch_config.infrastructure.gpu_config.vcpus,
+                        vcpus_reservation=crunch_config.infrastructure.gpu_config.vcpus_reservation,
+                        memory=crunch_config.infrastructure.gpu_config.memory,
+                        memory_reservation=crunch_config.infrastructure.gpu_config.memory_reservation,
+                        instances_types=crunch_config.infrastructure.gpu_config.instances_types,
+                        gpus=crunch_config.infrastructure.gpu_config.gpus
+                    )
 
                 infrastructure = Infrastructure(
                     cluster_name=crunch_config.infrastructure.cluster_name,
@@ -97,14 +108,7 @@ class CrunchService:
                         memory_reservation=crunch_config.infrastructure.cpu_config.memory_reservation,
                         instances_types=crunch_config.infrastructure.cpu_config.instances_types
                     ),
-                    gpu_config=GpuConfig(
-                        vcpus=crunch_config.infrastructure.gpu_config.vcpus,
-                        vcpus_reservation=crunch_config.infrastructure.gpu_config.vcpus_reservation,
-                        memory=crunch_config.infrastructure.gpu_config.memory,
-                        memory_reservation=crunch_config.infrastructure.gpu_config.memory_reservation,
-                        instances_types=crunch_config.infrastructure.gpu_config.instances_types,
-                        gpus=crunch_config.infrastructure.gpu_config.gpus
-                    ),
+                    gpu_config=gpu_config,
                     is_secure=crunch_config.infrastructure.is_secure,
                     runner_envs=dict(crunch_config.infrastructure.runner_envs),
                 )
