@@ -216,7 +216,7 @@ class WebSocketServer(ModelsStateObserver):
                 if not self.model_state_mediator.is_model_in_crunch(model_id, crunch_id):
                     get_logger().warning(f"Client {client_id} tried to report failure for model {model_id} not belonging to crunch {crunch_id}")
                     continue
-                self.model_state_mediator.report_failure(failure_code=model['failure_code'], model_id=model_id, ip=model['ip'])
+                self.model_state_mediator.report_failure(failure_code=model['failure_code'], model_id=model_id, ip=model['ip'], failure_reason=model.get('failure_reason'))
 
     async def _process_queue(self):
         stop = False

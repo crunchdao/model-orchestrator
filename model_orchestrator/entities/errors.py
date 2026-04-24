@@ -28,6 +28,7 @@ class ModelRunnerErrorType(ErrorType):
     BAD_IMPLEMENTATION = "MODEL_RUNNER_BAD_IMPLEMENTATION"
     MULTIPLE_TIMEOUT = "MODEL_RUNNER_MULTIPLE_TIMEOUT"
     MULTIPLE_FAILED = "MODEL_RUNNER_MULTIPLE_FAILED"
+    LOW_PERFORMANCE = "MODEL_LOW_PERFORMANCE"
 
 
 DEFAULT_REASONS = {
@@ -41,7 +42,8 @@ DEFAULT_REASONS = {
     ModelRunnerErrorType.CONNECTION_FAILED: "Failed to establish a connection to the model runner. We are informed of the issue and will resolve it as soon as possible.",
     ModelRunnerErrorType.BAD_IMPLEMENTATION: "The implementation provided is incorrect or incomplete. Please review and fix your code before trying again.",
     ModelRunnerErrorType.MULTIPLE_TIMEOUT: "The model runner experienced multiple timeouts. Optimize your code before trying again.",
-    ModelRunnerErrorType.MULTIPLE_FAILED: "The model runner encountered multiple failures. Inspect runner logs and retry after resolving issues."
+    ModelRunnerErrorType.MULTIPLE_FAILED: "The model runner encountered multiple failures. Inspect runner logs and retry after resolving issues.",
+    ModelRunnerErrorType.LOW_PERFORMANCE: "The model has been disabled due to insufficient performance. Please review and improve your model before resubmitting."
 }
 
 

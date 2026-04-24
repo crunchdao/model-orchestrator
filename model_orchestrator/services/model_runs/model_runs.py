@@ -202,7 +202,7 @@ class ModelRunsService:
 
         with self.lock:
             # treat here the stopping and reporting or failure to the user
-            for failure_code, model_id, ip in failures_reported:
+            for failure_code, model_id, ip, failure_reason in failures_reported:
                 for model_item in self.cluster.get_models_by_model_id(model_id):
                     if model_item.ip == ip:
                         model_run = model_item
@@ -211,7 +211,7 @@ class ModelRunsService:
                     get_logger().warning(f"Report failure:{failure_code} for the model_id:{model_id} and ip:{ip} not found in cluster")
                     return
 
-                self.error_handling.handle_error_from_exception(OrchestratorError(model_run, get_model_runner_error(failure_code)))
+                self.error_handling.handle_error_from_exception(OrchestratorError(model_run, get_model_runner_error(failure_code), reason=failure_reason))
 
             # Here doing update of states from AWS
             for service in services:
@@ -244,6 +244,6 @@ class ModelRunsService:
         return models
 
     # error reported from coordinator
-    def report_model_runner_failure(self, failure_code, model_id, ip):
+    def report_model_runner_failure(self, failure_code, model_id, ip, failure_reason=None):
         with self.failures_reported_lock:
-            self.failures_reported.append((failure_code, model_id, ip))
+            self.failures_reported.append((failure_code, model_id, ip, failure_reason))

@@ -76,7 +76,8 @@ class TestWebSocketServer(unittest.TestCase):
 
         self.model_state_mediator_mock.report_failure.assert_called_once_with(failure_code='CONNECTION_FAILED',
                                                                               model_id='mock_model_id',
-                                                                              ip='127.0.0.1')
+                                                                              ip='127.0.0.1',
+                                                                              failure_reason=None)
 
     def test_events(self):
         self.loop.run_until_complete(self.async_test_events())
