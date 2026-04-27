@@ -25,6 +25,7 @@ class InfrastructureConfig(_BaseConfig):
     cpu_config: Optional[CpuConfig] = Field(None, description="CPU configuration")
     gpu_config: Optional[GpuConfig] = Field(None, description="GPU configuration")
     is_secure: bool = Field(False, description="Specifies whether the infrastructure setup uses a security model protocol.")
+    network_mode: str = Field("bridge", description="Container network mode: 'bridge' (internet access, no inter-container) or 'none' (no network at all).")
     runner_envs: Dict[str, str] = Field(default_factory=dict, description="Additional environment variables injected into runner containers. Passed as-is to the ECS task definition (e.g. GRPC_TRACE, GRPC_VERBOSITY, SANDBOX_PROXY_URL).")
 
 

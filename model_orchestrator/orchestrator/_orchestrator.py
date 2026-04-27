@@ -56,40 +56,31 @@ class Orchestrator:
         if True:
             logger.debug("Configuring builder and runner...")
 
+            builder_config = configuration.infrastructure.builder
             runner_config = configuration.infrastructure.runner
-            if runner_config.type == "aws":
-                logger.info("Configuring AWS builder and runner...")
 
+            # ── Builder ──
+            if builder_config.type == "aws":
+                logger.info("Configuring AWS builder...")
                 from ..infrastructure.aws import AwsCodeBuildModelBuilder
-                model_builder = AwsCodeBuildModelBuilder(runner_config)
-
-                from ..infrastructure.aws import AwsEcsModelRunner
-                model_runner = AwsEcsModelRunner(runner_config)
-            elif runner_config.type == "local":
-                logger.info("Configuring Local builder and runner...")
-
+                model_builder = AwsCodeBuildModelBuilder(builder_config)
+            elif builder_config.type == "local":
+                logger.info("Configuring Local builder...")
                 from ..infrastructure.local import LocalModelBuilder, RebuildMode
                 model_builder = LocalModelBuilder(
-                    submission_storage_path_provider=runner_config.format_submission_storage_path,
-                    resource_storage_path_provider=runner_config.format_resource_storage_path,
-                    rebuild_mode=RebuildMode.map(runner_config.rebuild_mode),
+                    submission_storage_path_provider=builder_config.format_submission_storage_path,
+                    resource_storage_path_provider=builder_config.format_resource_storage_path,
+                    rebuild_mode=RebuildMode.map(builder_config.rebuild_mode),
                 )
-
-                from ..infrastructure.local import LocalModelRunner
-                model_runner = LocalModelRunner(
-                    docker_network_name=runner_config.docker_network_name
-                )
-            elif runner_config.type == "phala":
-                logger.info("Configuring Phala TEE builder and runner...")
-
-                from ..infrastructure.phala import PhalaModelBuilder, PhalaModelRunner
+            elif builder_config.type == "phala":
+                logger.info("Configuring Phala builder...")
+                from ..infrastructure.phala import PhalaModelBuilder
                 from ..infrastructure.phala._cluster import PhalaCluster
 
-                # Initialize cluster: discovers CVMs from Phala API
                 def _get_active_model_count():
                     """Count models actively using CVM resources (building, starting, or running)."""
                     if not hasattr(self, 'models_run_service'):
-                        return 0  # Not initialized yet (during startup)
+                        return 0
                     cluster = self.models_run_service.cluster
                     return len(cluster.get_models_in_build_phase()) + len(cluster.get_models_in_run_phase())
 
@@ -109,9 +100,29 @@ class Orchestrator:
                 cluster.discover()
                 cluster.rebuild_task_map()
                 self.phala_cluster = cluster
-
                 model_builder = PhalaModelBuilder(cluster)
-                model_runner = PhalaModelRunner(cluster)
+            else:
+                raise ValueError(f"Unknown builder type: {builder_config.type}")
+
+            # ── Runner ──
+            if runner_config.type == "aws":
+                logger.info("Configuring AWS ECS runner...")
+                from ..infrastructure.aws import AwsEcsModelRunner
+                model_runner = AwsEcsModelRunner(runner_config)
+            elif runner_config.type == "local":
+                logger.info("Configuring Local runner...")
+                from ..infrastructure.local import LocalModelRunner
+                model_runner = LocalModelRunner(
+                    docker_network_name=runner_config.docker_network_name
+                )
+            elif runner_config.type == "nomad":
+                logger.info("Configuring Nomad runner...")
+                from ..infrastructure.nomad import NomadModelRunner
+                model_runner = NomadModelRunner(runner_config)
+            elif runner_config.type == "phala":
+                logger.info("Configuring Phala runner...")
+                from ..infrastructure.phala import PhalaModelRunner
+                model_runner = PhalaModelRunner(self.phala_cluster)
             else:
                 raise ValueError(f"Unknown runner type: {runner_config.type}")
 

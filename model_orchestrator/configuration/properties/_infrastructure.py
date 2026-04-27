@@ -15,11 +15,39 @@ class SqliteDatabaseInfrastructureConfig(_BaseConfig):
 DatabaseInfrastructureConfig = Union[SqliteDatabaseInfrastructureConfig]
 
 
-class AwsRunnerInfrastructureConfig(_BaseConfig):
+# ── Builder configs ──
+
+class AwsBuilderInfrastructureConfig(_BaseConfig):
     type: Literal["aws"] = "aws"
     s3_bucket_name: str = Field("crunchdao--competition--staging", description="S3 bucket name for model submissions and resources")
     codebuild_project_name: str = Field("model-builder", description="AWS CodeBuild project name for building models")
     ecr_repository_name: str = Field("crunchers-models-staging", description="AWS ECR name for saving models")
+
+
+class LocalBuilderInfrastructureConfig(_BaseConfig):
+    type: Literal["local"] = "local"
+    submission_storage_path_format: str = Field(..., description="Submission storage path, use {id} for submission ID")
+    resource_storage_path_format: str = Field(..., description="Resource storage path, use {id} for resource ID")
+    rebuild_mode: RebuildModeStringType = Field("disabled", description="Force rebuild of Docker images, useful for development")
+
+    def format_submission_storage_path(self, submission_id: int | str) -> str:
+        return self.submission_storage_path_format.format(id=submission_id)
+
+    def format_resource_storage_path(self, resource_id: int | str) -> str:
+        return self.resource_storage_path_format.format(id=resource_id)
+
+
+class PhalaBuilderInfrastructureConfig(_BaseConfig):
+    type: Literal["phala"] = "phala"
+
+
+BuilderInfrastructureConfig = Union[AwsBuilderInfrastructureConfig, LocalBuilderInfrastructureConfig, PhalaBuilderInfrastructureConfig]
+
+
+# ── Runner configs ──
+
+class AwsRunnerInfrastructureConfig(_BaseConfig):
+    type: Literal["aws"] = "aws"
     max_task_restarts: int = Field(4, description="Maximum number of task restarts within the restart window before marking as FAILED")
     restart_window_hours: int = Field(24, description="Time window in hours for counting task restarts")
 
@@ -34,10 +62,6 @@ class LocalRunnerInfrastructureConfig(_BaseConfig):
         "a Docker container together with all other components, the models, and" +
         "the coordinator",
     )
-    submission_storage_path_format: str = Field(..., description="Submission storage path, use {id} for submission ID")
-    resource_storage_path_format: str = Field(..., description="Resource storage path, use {id} for resource ID")
-    rebuild_mode: RebuildModeStringType = Field("disabled", description="Force rebuild of Docker images, useful for development")
-
 
     @field_validator("docker_network_name", mode="before")
     def empty_str_is_none(cls, v):
@@ -45,11 +69,17 @@ class LocalRunnerInfrastructureConfig(_BaseConfig):
             return None
         return v
 
-    def format_submission_storage_path(self, submission_id: int | str) -> str:
-        return self.submission_storage_path_format.format(id=submission_id)
 
-    def format_resource_storage_path(self, resource_id: int | str) -> str:
-        return self.resource_storage_path_format.format(id=resource_id)
+class NomadRunnerInfrastructureConfig(_BaseConfig):
+    type: Literal["nomad"] = "nomad"
+    nomad_addr: str = Field("http://127.0.0.1:4646", description="Nomad HTTP API address")
+    datacenter: str = Field("hetzner", description="Nomad datacenter name")
+    runtime: str = Field("kata", description="Docker runtime for containers (kata or runc)")
+    restart_attempts: int = Field(2, description="Max restarts per allocation within restart_interval")
+    restart_interval_s: int = Field(3600, description="Restart policy interval in seconds")
+    restart_delay_s: int = Field(30, description="Delay between restarts in seconds")
+    reschedule_attempts: int = Field(1, description="Max reschedules (new allocations) after restart policy exhausted")
+    reschedule_delay_s: int = Field(60, description="Delay before rescheduling in seconds")
 
 
 class PhalaRunnerInfrastructureConfig(_BaseConfig):
@@ -66,7 +96,7 @@ class PhalaRunnerInfrastructureConfig(_BaseConfig):
     gateway_key_path: str = Field(..., description="Path to the coordinator RSA private key file (PEM) for gateway auth signing.")
 
 
-RunnerInfrastructureConfig = Union[AwsRunnerInfrastructureConfig, LocalRunnerInfrastructureConfig, PhalaRunnerInfrastructureConfig]
+RunnerInfrastructureConfig = Union[AwsRunnerInfrastructureConfig, LocalRunnerInfrastructureConfig, PhalaRunnerInfrastructureConfig, NomadRunnerInfrastructureConfig]
 
 
 class RabbitMQPublisherInfrastructureConfig(_BaseConfig):
@@ -93,5 +123,6 @@ PublisherInfrastructureConfig = Union[RabbitMQPublisherInfrastructureConfig | We
 
 class InfrastructureConfig(_BaseConfig):
     database: DatabaseInfrastructureConfig = Field(..., discriminator='type')
+    builder: BuilderInfrastructureConfig = Field(..., discriminator='type')
     runner: RunnerInfrastructureConfig = Field(..., discriminator='type')
     publishers: list[Annotated[PublisherInfrastructureConfig, Field(..., discriminator='type')]]
