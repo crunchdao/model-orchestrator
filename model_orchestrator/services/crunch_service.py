@@ -82,25 +82,30 @@ class CrunchService:
                     network_mode=crunch_config.infrastructure.network_mode,
                 )
             else:
-                # For AWS runner, require full infrastructure config
-                if not crunch_config.infrastructure.cpu_config or not crunch_config.infrastructure.gpu_config:
-                    raise ValueError(f"AWS runner requires full infrastructure configuration for crunch {crunch_config.id}")
+                if not crunch_config.infrastructure.cpu_config and not crunch_config.infrastructure.gpu_config:
+                    raise ValueError(f"Runner requires at least cpu or gpu configuration for crunch {crunch_config.id}")
+
+                cpu_config = CpuConfig(
+                    vcpus=crunch_config.infrastructure.cpu_config.vcpus,
+                    memory=crunch_config.infrastructure.cpu_config.memory,
+                    memory_reservation=crunch_config.infrastructure.cpu_config.memory_reservation,
+                    instances_types=crunch_config.infrastructure.cpu_config.instances_types
+                ) if crunch_config.infrastructure.cpu_config else None
+
+                gpu_config = GpuConfig(
+                    vcpus=crunch_config.infrastructure.gpu_config.vcpus,
+                    memory=crunch_config.infrastructure.gpu_config.memory,
+                    memory_reservation=crunch_config.infrastructure.gpu_config.memory_reservation,
+                    instances_types=crunch_config.infrastructure.gpu_config.instances_types,
+                    gpus=crunch_config.infrastructure.gpu_config.gpus
+                ) if crunch_config.infrastructure.gpu_config else None
 
                 infrastructure = Infrastructure(
                     cluster_name=crunch_config.infrastructure.cluster_name,
                     zone=crunch_config.infrastructure.zone,
                     runner_type=runner_type,
-                    cpu_config=CpuConfig(
-                        vcpus=crunch_config.infrastructure.cpu_config.vcpus,
-                        memory=crunch_config.infrastructure.cpu_config.memory,
-                        instances_types=crunch_config.infrastructure.cpu_config.instances_types
-                    ),
-                    gpu_config=GpuConfig(
-                        vcpus=crunch_config.infrastructure.gpu_config.vcpus,
-                        memory=crunch_config.infrastructure.gpu_config.memory,
-                        instances_types=crunch_config.infrastructure.gpu_config.instances_types,
-                        gpus=crunch_config.infrastructure.gpu_config.gpus
-                    ),
+                    cpu_config=cpu_config,
+                    gpu_config=gpu_config,
                     is_secure=crunch_config.infrastructure.is_secure,
                     network_mode=crunch_config.infrastructure.network_mode,
                     runner_envs=dict(crunch_config.infrastructure.runner_envs),

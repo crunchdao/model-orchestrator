@@ -27,6 +27,7 @@ class NomadModelRunner(Runner):
         self.nomad_addr = config.nomad_addr
         self.datacenter = config.datacenter
         self.runtime = config.runtime
+        self.nomad_token = getattr(config, 'nomad_token', None)
         self.restart_attempts = getattr(config, 'restart_attempts', 2)
         self.restart_interval_s = getattr(config, 'restart_interval_s', 3600)
         self.restart_delay_s = getattr(config, 'restart_delay_s', 30)
@@ -37,6 +38,10 @@ class NomadModelRunner(Runner):
         return f"{self.nomad_addr}/v1{path}"
 
     def _request(self, method: str, path: str, **kwargs) -> requests.Response:
+        if self.nomad_token:
+            headers = kwargs.pop("headers", {})
+            headers["X-Nomad-Token"] = self.nomad_token
+            kwargs["headers"] = headers
         resp = requests.request(method, self._url(path), timeout=30, **kwargs)
         resp.raise_for_status()
         return resp
@@ -65,7 +70,7 @@ class NomadModelRunner(Runner):
         env.update(crunch.resolve_runner_envs())
 
         # CPU: reservation only, no hard limit (containers can burst on idle CPU)
-        cpu_mhz = int((hw_config.vcpus_reservation or hw_config.vcpus) * 1000)
+        cpu_mhz = int(hw_config.vcpus * 1000)
         # Memory: reservation for scheduling, max for OOM kill
         memory_mb = hw_config.memory_reservation or hw_config.memory
         memory_max_mb = hw_config.memory
@@ -141,7 +146,9 @@ class NomadModelRunner(Runner):
             "datacenter": self.datacenter,
         }
 
-        return job_id, None, runner_info
+        logs_arn = f"arn:loki:logs:log-query:com_hashicorp_nomad_job_id/{job_id}"
+
+        return job_id, logs_arn, runner_info
 
     def stop(self, model: ModelRun) -> str:
         job_id = model.runner_info["job_id"]
@@ -163,20 +170,20 @@ class NomadModelRunner(Runner):
 
         for model in models:
             job_id = model.runner_info.get("job_id", model.runner_job_id)
-            status, ip, port = self._get_allocation_status(job_id)
+            status, ip, port, alloc_id = self._get_allocation_status(job_id)
             results[model] = (status, ip, port)
 
         return results
 
     def _get_allocation_status(
         self, job_id: str
-    ) -> tuple[ModelRun.RunnerStatus, str | None, int]:
+    ) -> tuple[ModelRun.RunnerStatus, str | None, int, str | None]:
         # Check if job exists first (/job/{id}/allocations returns 200 [] for nonexistent jobs)
         try:
             job_resp = self._request("GET", f"/job/{job_id}")
         except requests.HTTPError as e:
             if e.response is not None and e.response.status_code == 404:
-                return ModelRun.RunnerStatus.FAILED, None, 0
+                return ModelRun.RunnerStatus.FAILED, None, 0, None
             raise
 
         job = job_resp.json()
@@ -189,8 +196,8 @@ class NomadModelRunner(Runner):
             if allocs:
                 latest = sorted(allocs, key=lambda a: a.get("CreateIndex", 0), reverse=True)[0]
                 if latest.get("ClientStatus") == "failed":
-                    return ModelRun.RunnerStatus.FAILED, None, 0
-            return ModelRun.RunnerStatus.STOPPED, None, 0
+                    return ModelRun.RunnerStatus.FAILED, None, 0, latest["ID"]
+            return ModelRun.RunnerStatus.STOPPED, None, 0, None
 
         resp = self._request("GET", f"/job/{job_id}/allocations")
         allocs = resp.json()
@@ -201,10 +208,11 @@ class NomadModelRunner(Runner):
             for ev in evals:
                 if ev.get("FailedTGAllocs"):
                     raise RuntimeError(f"Nomad: no capacity to place job {job_id}: {ev['FailedTGAllocs']}")
-            return ModelRun.RunnerStatus.INITIALIZING, None, 0
+            return ModelRun.RunnerStatus.INITIALIZING, None, 0, None
 
         # Get the most recent allocation
         alloc = sorted(allocs, key=lambda a: a.get("CreateIndex", 0), reverse=True)[0]
+        alloc_id = alloc["ID"]
         client_status = alloc.get("ClientStatus", "")
 
         # Check task state for more detail
@@ -214,7 +222,7 @@ class NomadModelRunner(Runner):
 
         # Current allocation failed but job is still alive = Nomad is rescheduling
         if task_state.get("Failed", False) or client_status == "failed":
-            return ModelRun.RunnerStatus.RECOVERING, None, 0
+            return ModelRun.RunnerStatus.RECOVERING, None, 0, alloc_id
 
         runner_status = self.NOMAD_TO_RUNNER_STATUS.get(
             task_status, ModelRun.RunnerStatus.INITIALIZING
@@ -226,7 +234,6 @@ class NomadModelRunner(Runner):
         ip = None
         port = 0
         if runner_status == ModelRun.RunnerStatus.RUNNING:
-            alloc_id = alloc["ID"]
             try:
                 full_alloc = self._request("GET", f"/allocation/{alloc_id}").json()
                 alloc_resources = full_alloc.get("AllocatedResources", {}) or {}
@@ -241,7 +248,7 @@ class NomadModelRunner(Runner):
             except requests.HTTPError:
                 get_logger().warning(f"Nomad: failed to fetch allocation {alloc_id} details")
 
-        return runner_status, ip, port
+        return runner_status, ip, port, alloc_id
 
     @staticmethod
     def _make_job_id(model: ModelRun, crunch: Crunch) -> str:

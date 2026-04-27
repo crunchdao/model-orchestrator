@@ -18,6 +18,7 @@ class RunnerType(Enum):
 class HardwareConfig:
     vcpus: float
     memory: int
+    memory_reservation: int | None = None
     instances_types: list[str] | None = None
 
 

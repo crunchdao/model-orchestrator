@@ -73,6 +73,7 @@ class LocalRunnerInfrastructureConfig(_BaseConfig):
 class NomadRunnerInfrastructureConfig(_BaseConfig):
     type: Literal["nomad"] = "nomad"
     nomad_addr: str = Field("http://127.0.0.1:4646", description="Nomad HTTP API address")
+    nomad_token: str | None = Field(None, description="Nomad ACL token for API authentication")
     datacenter: str = Field("hetzner", description="Nomad datacenter name")
     runtime: str = Field("kata", description="Docker runtime for containers (kata or runc)")
     restart_attempts: int = Field(2, description="Max restarts per allocation within restart_interval")

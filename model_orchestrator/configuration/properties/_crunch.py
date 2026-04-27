@@ -8,13 +8,15 @@ from ._base import BaseConfig as _BaseConfig
 
 class CpuConfig(_BaseConfig):
     vcpus: float = Field(..., description="Number of virtual CPUs")
-    memory: int = Field(..., description="Memory in MB")
+    memory: int = Field(..., description="Memory in MB (hard limit)")
+    memory_reservation: Optional[int] = Field(None, description="Memory soft limit in MB (used for scheduling). If not set, memory is used.")
     instances_types: Optional[List[str]] = Field(None, description="List of instance types")
 
 
 class GpuConfig(_BaseConfig):
     vcpus: float = Field(..., description="Number of virtual CPUs")
-    memory: int = Field(..., description="Memory in MB")
+    memory: int = Field(..., description="Memory in MB (hard limit)")
+    memory_reservation: Optional[int] = Field(None, description="Memory soft limit in MB (used for scheduling). If not set, memory is used.")
     instances_types: Optional[List[str]] = Field(None, description="List of instance types")
     gpus: int = Field(..., description="Number of GPUs")
 
