@@ -9,6 +9,8 @@ import time
 import unittest
 from types import SimpleNamespace
 
+import pytest
+
 from model_orchestrator.entities import ModelRun, CruncherOnchainInfo
 from model_orchestrator.entities.crunch import Crunch, Infrastructure, CpuConfig, RunnerType
 from model_orchestrator.infrastructure.nomad._runner import NomadModelRunner
@@ -56,6 +58,7 @@ def make_model(model_id="test-model-001", code_submission_id="sub-001", docker_i
     )
 
 
+@pytest.mark.integration
 class TestNomadModelRunner(unittest.TestCase):
 
     def setUp(self):
