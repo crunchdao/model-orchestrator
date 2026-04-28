@@ -70,7 +70,7 @@ class NomadModelRunner(Runner):
         env.update(crunch.resolve_runner_envs())
 
         # CPU: reservation only, no hard limit (containers can burst on idle CPU)
-        cpu_mhz = int(hw_config.vcpus * 1000)
+        cpu_mhz = int(hw_config.vcpus * 2500)
         # Memory: reservation for scheduling, max for OOM kill
         memory_mb = hw_config.memory_reservation or hw_config.memory
         memory_max_mb = hw_config.memory

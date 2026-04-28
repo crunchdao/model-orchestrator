@@ -59,6 +59,9 @@ class SQLiteCrunchRepository(SQLiteRepository, CrunchRepository):
             self._add_column_if_not_exists(db, 'crunches', 'coordinator_cert_hash_secondary', str)
             self._add_column_if_not_exists(db, 'crunches', 'is_active', bool, not_null_default=True)
             self._add_column_if_not_exists(db, 'crunches', 'runner_envs', str)
+            self._add_column_if_not_exists(db, 'crunches', 'cpu_memory_reservation', int)
+            self._add_column_if_not_exists(db, 'crunches', 'gpu_memory_reservation', int)
+            self._add_column_if_not_exists(db, 'crunches', 'network_mode', str)
 
     def save(self, crunch: Crunch):
         with self._open() as db:
@@ -73,9 +76,11 @@ class SQLiteCrunchRepository(SQLiteRepository, CrunchRepository):
                     "runner_type": crunch.infrastructure.runner_type.value,
                     "cpu_vcpus": crunch.infrastructure.cpu_config.vcpus if crunch.infrastructure.cpu_config else None,
                     "cpu_memory": crunch.infrastructure.cpu_config.memory if crunch.infrastructure.cpu_config else None,
+                    "cpu_memory_reservation": crunch.infrastructure.cpu_config.memory_reservation if crunch.infrastructure.cpu_config else None,
                     "cpu_instance_types": json.dumps(crunch.infrastructure.cpu_config.instances_types) if crunch.infrastructure.cpu_config else None,
                     "gpu_vcpus": crunch.infrastructure.gpu_config.vcpus if crunch.infrastructure.gpu_config else None,
                     "gpu_memory": crunch.infrastructure.gpu_config.memory if crunch.infrastructure.gpu_config else None,
+                    "gpu_memory_reservation": crunch.infrastructure.gpu_config.memory_reservation if crunch.infrastructure.gpu_config else None,
                     "gpu_instance_types": json.dumps(crunch.infrastructure.gpu_config.instances_types) if crunch.infrastructure.gpu_config else None,
                     "gpus_per_instance": crunch.infrastructure.gpu_config.gpus if crunch.infrastructure.gpu_config else None,
                     "runner_config": json.dumps(crunch.runner_config),
@@ -88,6 +93,7 @@ class SQLiteCrunchRepository(SQLiteRepository, CrunchRepository):
                     "coordinator_cert_hash": crunch.coordinator_info.cert_hash if crunch.coordinator_info else None,
                     "coordinator_cert_hash_secondary": crunch.coordinator_info.cert_hash_secondary if crunch.coordinator_info else None,
                     "is_active": crunch.is_active,
+                    "network_mode": crunch.infrastructure.network_mode,
                     "runner_envs": json.dumps(crunch.infrastructure.runner_envs) if crunch.infrastructure.runner_envs else None,
                 },
                 pk="id"
@@ -162,14 +168,17 @@ class SQLiteCrunchRepository(SQLiteRepository, CrunchRepository):
                 cpu_config=CpuConfig(
                     vcpus=values["cpu_vcpus"],
                     memory=values["cpu_memory"],
+                    memory_reservation=values.get("cpu_memory_reservation"),
                     instances_types=json.loads(values["cpu_instance_types"]) if values["cpu_instance_types"] else None
                 ) if values["cpu_vcpus"] is not None else None,
                 gpu_config=GpuConfig(
                     vcpus=values["gpu_vcpus"],
                     memory=values["gpu_memory"],
+                    memory_reservation=values.get("gpu_memory_reservation"),
                     instances_types=json.loads(values["gpu_instance_types"]) if values["gpu_instance_types"] else None,
                     gpus=values["gpus_per_instance"]
                 ) if values["gpu_vcpus"] is not None else None,
+                network_mode=values.get("network_mode", "bridge"),
                 runner_envs=json.loads(values["runner_envs"]) if values.get("runner_envs") else {},
             ),
             runner_config=json.loads(values["runner_config"]),
