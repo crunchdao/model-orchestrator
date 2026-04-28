@@ -97,6 +97,9 @@ class NomadModelRunner(Runner):
                             "Delay": self.reschedule_delay_s * 1_000_000_000,
                             "Unlimited": False,
                         },
+                        "Update": {
+                            "HealthyDeadline": 600000000000,  # 10min in nanoseconds
+                        },
                         "EphemeralDisk": {
                             "SizeMB": 8192,
                             "Migrate": False,
