@@ -118,6 +118,7 @@ class NomadModelRunner(Runner):
                                     "image": image,
                                     "ports": ["grpc"],
                                     "runtime": self.runtime,
+                                    "cpu_hard_limit": True,
                                 },
                                 "Env": env,
                                 "Resources": {
