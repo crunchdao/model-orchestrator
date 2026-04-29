@@ -387,12 +387,22 @@ class Orchestrator:
         except Exception as e:
             get_logger().error(f"Error updating model states: {e}", exc_info=e)
 
+    def republish_states(self):
+        """Force republish all running model states to observers."""
+        running_models = self.models_run_service.get_running_models()
+        logger.info(f"Republishing states for {len(running_models)} running models")
+        for model in running_models:
+            self.models_run_service.state_subject.notify_runner_state_changed(model, None, model.runner_status)
+
     async def run(self):
         loop = asyncio.get_running_loop()
         add_signal_handler(loop, signal.SIGINT, self.shutdown)
         add_signal_handler(loop, signal.SIGTERM, self.shutdown)
 
         await self._start()
+
+        if self.config.republish_states:
+            self.republish_states()
 
         await self.stop_event.wait()
 
