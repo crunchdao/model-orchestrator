@@ -150,7 +150,7 @@ class NomadModelRunner(Runner):
             "datacenter": self.datacenter,
         }
 
-        logs_arn = f"arn:loki:logs:log-query:com_hashicorp_nomad_job_id/{job_id}"
+        logs_arn = f"loki:logs:log-query:com_hashicorp_nomad_job_id/{job_id}"
 
         return job_id, logs_arn, runner_info
 
