@@ -98,7 +98,7 @@ class NomadModelRunner(Runner):
                             "Unlimited": False,
                         },
                         "Update": {
-                            "HealthyDeadline": 600000000000,  # 10min in nanoseconds
+                            "HealthyDeadline": 540000000000,  # 9min
                         },
                         "EphemeralDisk": {
                             "SizeMB": 8192,
@@ -170,89 +170,68 @@ class NomadModelRunner(Runner):
         self,
         models: list[ModelRun],
     ) -> dict[ModelRun, tuple[ModelRun.RunnerStatus, str, int]]:
-        results = {}
+        if not models:
+            return {}
 
+        # 2 API calls for all models instead of 3N
+        jobs_by_id = {j["ID"]: j for j in self._request("GET", "/jobs").json()}
+
+        allocs_by_job = {}
+        for alloc in self._request("GET", "/allocations?resources=true").json():
+            job_id = alloc.get("JobID", "")
+            if job_id not in allocs_by_job or alloc.get("CreateIndex", 0) > allocs_by_job[job_id].get("CreateIndex", 0):
+                allocs_by_job[job_id] = alloc
+
+        results = {}
         for model in models:
             job_id = model.runner_info.get("job_id", model.runner_job_id)
-            status, ip, port, alloc_id = self._get_allocation_status(job_id)
-            results[model] = (status, ip, port)
+            results[model] = self._resolve_status(job_id, jobs_by_id, allocs_by_job)
 
         return results
 
-    def _get_allocation_status(
-        self, job_id: str
-    ) -> tuple[ModelRun.RunnerStatus, str | None, int, str | None]:
-        # Check if job exists first (/job/{id}/allocations returns 200 [] for nonexistent jobs)
-        try:
-            job_resp = self._request("GET", f"/job/{job_id}")
-        except requests.HTTPError as e:
-            if e.response is not None and e.response.status_code == 404:
-                return ModelRun.RunnerStatus.FAILED, None, 0, None
-            raise
+    def _resolve_status(
+        self, job_id: str, jobs_by_id: dict, allocs_by_job: dict,
+    ) -> tuple[ModelRun.RunnerStatus, str | None, int]:
+        job = jobs_by_id.get(job_id)
+        if not job:
+            return ModelRun.RunnerStatus.FAILED, None, 0
 
-        job = job_resp.json()
-        job_status = job.get("Status", "")
+        if job.get("Status") == "dead":
+            alloc = allocs_by_job.get(job_id)
+            if alloc and alloc.get("ClientStatus") == "failed":
+                return ModelRun.RunnerStatus.FAILED, None, 0
+            return ModelRun.RunnerStatus.STOPPED, None, 0
 
-        # Job dead = Nomad decided to stop (reschedules exhausted or stopped manually)
-        if job_status == "dead":
-            resp = self._request("GET", f"/job/{job_id}/allocations")
-            allocs = resp.json()
-            if allocs:
-                latest = sorted(allocs, key=lambda a: a.get("CreateIndex", 0), reverse=True)[0]
-                if latest.get("ClientStatus") == "failed":
-                    return ModelRun.RunnerStatus.FAILED, None, 0, latest["ID"]
-            return ModelRun.RunnerStatus.STOPPED, None, 0, None
+        alloc = allocs_by_job.get(job_id)
+        if not alloc:
+            return ModelRun.RunnerStatus.INITIALIZING, None, 0
 
-        resp = self._request("GET", f"/job/{job_id}/allocations")
-        allocs = resp.json()
-
-        if not allocs:
-            # Check if Nomad failed to place the allocation (no capacity)
-            evals = self._request("GET", f"/job/{job_id}/evaluations").json()
-            for ev in evals:
-                if ev.get("FailedTGAllocs"):
-                    raise RuntimeError(f"Nomad: no capacity to place job {job_id}: {ev['FailedTGAllocs']}")
-            return ModelRun.RunnerStatus.INITIALIZING, None, 0, None
-
-        # Get the most recent allocation
-        alloc = sorted(allocs, key=lambda a: a.get("CreateIndex", 0), reverse=True)[0]
-        alloc_id = alloc["ID"]
-        client_status = alloc.get("ClientStatus", "")
-
-        # Check task state for more detail
         task_states = alloc.get("TaskStates", {}) or {}
         task_state = task_states.get("runner", {})
         task_status = task_state.get("State", "")
+        client_status = alloc.get("ClientStatus", "")
 
-        # Current allocation failed but job is still alive = Nomad is rescheduling
         if task_state.get("Failed", False) or client_status == "failed":
-            return ModelRun.RunnerStatus.RECOVERING, None, 0, alloc_id
+            return ModelRun.RunnerStatus.RECOVERING, None, 0
 
         runner_status = self.NOMAD_TO_RUNNER_STATUS.get(
             task_status, ModelRun.RunnerStatus.INITIALIZING
         )
 
-        # Extract public IP and dynamic port
-        # /job/{id}/allocations doesn't include AllocatedResources,
-        # so we fetch the full allocation detail
         ip = None
         port = 0
         if runner_status == ModelRun.RunnerStatus.RUNNING:
-            try:
-                full_alloc = self._request("GET", f"/allocation/{alloc_id}").json()
-                alloc_resources = full_alloc.get("AllocatedResources", {}) or {}
-                shared = alloc_resources.get("Shared", {}) or {}
-                networks = shared.get("Networks", [])
-                if networks:
-                    ip = networks[0].get("IP")
-                    for dp in networks[0].get("DynamicPorts", []):
-                        if dp.get("Label") == "grpc":
-                            port = dp.get("Value", 0)
-                            break
-            except requests.HTTPError:
-                get_logger().warning(f"Nomad: failed to fetch allocation {alloc_id} details")
+            alloc_resources = alloc.get("AllocatedResources", {}) or {}
+            shared = alloc_resources.get("Shared", {}) or {}
+            networks = shared.get("Networks", [])
+            if networks:
+                ip = networks[0].get("IP")
+                for dp in networks[0].get("DynamicPorts", []):
+                    if dp.get("Label") == "grpc":
+                        port = dp.get("Value", 0)
+                        break
 
-        return runner_status, ip, port, alloc_id
+        return runner_status, ip, port
 
     @staticmethod
     def _make_job_id(model: ModelRun, crunch: Crunch) -> str:

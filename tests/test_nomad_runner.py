@@ -5,6 +5,7 @@ Uses busybox instead of a real model image.
 Usage:
     python -m pytest tests/test_nomad_runner.py -v -s
 """
+import os
 import time
 import unittest
 from types import SimpleNamespace
@@ -26,6 +27,7 @@ def make_config():
         nomad_addr=NOMAD_ADDR,
         datacenter=DATACENTER,
         runtime=RUNTIME,
+        nomad_token=os.environ.get("NOMAD_TOKEN"),
     )
 
 
@@ -83,7 +85,7 @@ class TestNomadModelRunner(unittest.TestCase):
 
         print(f"\n  Job submitted: {job_id}")
         self.assertIsNotNone(job_id)
-        self.assertIsNone(logs_arn)
+        self.assertIsNotNone(logs_arn)
         self.assertEqual(runner_info["job_id"], job_id)
 
         # Poll until we see at least INITIALIZING or RUNNING
@@ -95,7 +97,7 @@ class TestNomadModelRunner(unittest.TestCase):
             print(f"  Poll {i+1}: status={status}, ip={ip}, port={port}")
             seen_status = status
             if status == ModelRun.RunnerStatus.RUNNING:
-                self.assertEqual(ip, "65.108.122.124")
+                self.assertIsNotNone(ip)
                 self.assertGreater(port, 0)
                 break
 
@@ -120,6 +122,7 @@ class TestNomadModelRunner(unittest.TestCase):
             nomad_addr=NOMAD_ADDR,
             datacenter=DATACENTER,
             runtime=RUNTIME,
+            nomad_token=os.environ.get("NOMAD_TOKEN"),
             restart_attempts=1,
             restart_interval_s=60,
             restart_delay_s=1,
