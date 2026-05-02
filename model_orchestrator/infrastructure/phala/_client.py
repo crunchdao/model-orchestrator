@@ -219,7 +219,13 @@ class SpawnteeClient:
         """GET /keypair/{submission_id} — get public key for encryption."""
         return self._request("GET", f"/keypair/{submission_id}").json()
 
-    def build_model(self, submission_id: str, model_name: str | None = None) -> dict:
+    def build_model(
+        self,
+        submission_id: str,
+        model_name: str | None = None,
+        storage_provider: str | None = None,
+        storage_references: dict[str, str] | None = None,
+    ) -> dict:
         """
         POST /build-model — submit a build task.
 
@@ -228,6 +234,10 @@ class SpawnteeClient:
         payload = {"submission_id": submission_id}
         if model_name:
             payload["model_name"] = model_name
+        if storage_provider:
+            payload["storage_provider"] = storage_provider
+        if storage_references:
+            payload["storage_references"] = storage_references
         response = self._request("POST", "/build-model", json=payload)
         return response.json()
 

@@ -110,7 +110,7 @@ class Orchestrator:
                 cluster.rebuild_task_map()
                 self.phala_cluster = cluster
 
-                model_builder = PhalaModelBuilder(cluster)
+                model_builder = PhalaModelBuilder(cluster, tournament_api=augmented_model_repository)
                 model_runner = PhalaModelRunner(cluster)
             else:
                 raise ValueError(f"Unknown runner type: {runner_config.type}")
