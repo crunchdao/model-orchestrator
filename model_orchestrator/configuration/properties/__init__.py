@@ -28,6 +28,8 @@ class AppConfig(_BaseConfig):
     tournament_api_url: str = Field(default="https://api.hub.crunchdao.com/", description="URL of the tournament API")
     use_augmented_info: bool = Field(True, description="Enable fetching of augmented information for models from the tournament API.")
     can_place_in_quarantine: bool = Field(True, description="Whether the orchestrator can place models in quarantine when multiple errors occur")
+    connection_failure_grace_minutes: int = Field(5, description="How long a steady stream of MODEL_RUNNER_CONNECTION_FAILED reports is tolerated (assumed infra self-healing) before the model is stopped as genuinely failed")
+    connection_failure_quiet_gap_minutes: int = Field(2, description="Gap without a MODEL_RUNNER_CONNECTION_FAILED report after which a new report starts a fresh grace window instead of extending the previous one")
 
     @staticmethod
     def from_yaml(yaml_content: str, *, exit_on_failure=True) -> 'AppConfig':

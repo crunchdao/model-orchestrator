@@ -42,3 +42,11 @@ class Runner(abc.ABC):
     @abc.abstractmethod
     def load_statuses(self, model: list[ModelRun]) -> dict[ModelRun, tuple[ModelRun.RunnerStatus, str, int]]:
         pass
+
+    def describe_stop_reason(self, model: ModelRun) -> str | None:
+        """
+        Best-effort lookup of the infrastructure-layer reason the model's last known job
+        stopped (e.g. AWS host maintenance vs a real crash). Returns None when the runner
+        has no such information (default) or it's no longer available.
+        """
+        return None

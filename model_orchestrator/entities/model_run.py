@@ -204,8 +204,8 @@ class ModelRun:
     def in_build_phase(self):
         return not self.in_run_phase() and self.builder_status is not None
 
-    def record_failure(self, error_code, reason, exception, traceback):
-        self.failure = Failure(self.id, error_code, reason, exception, traceback)
+    def record_failure(self, error_code, reason, exception, traceback, infra_reason=None):
+        self.failure = Failure(self.id, error_code, reason, exception, traceback, infra_reason=infra_reason)
 
     def has_failed(self):
         return self.failure is not None

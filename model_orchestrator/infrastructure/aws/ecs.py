@@ -241,6 +241,20 @@ class AwsEcsModelRunner(Runner):
         aws_ecs.stop_service(model.runner_info['cluster_name'], service_name)
         return service_name
 
+    def describe_stop_reason(self, model: ModelRun) -> str | None:
+        runner_info = model.runner_info or {}
+        task_history = runner_info.get('task_history') or []
+        if not task_history:
+            return None
+
+        task_arn = task_history[-1]['task_arn']
+        cluster_name = runner_info.get('cluster_name')
+        if not task_arn or not cluster_name:
+            return None
+
+        aws_ecs = AwsEcsRunner(None)
+        return aws_ecs.describe_task_stop_reason(cluster_name, task_arn)
+
 
 class AwsEcsRunner:
     class JobType(Enum):
@@ -605,6 +619,29 @@ class AwsEcsRunner:
                         services_status[service_name]["task_created_at"] = task_info.get("task_created_at")
 
         return services_status
+
+    def describe_task_stop_reason(self, cluster_name: str, task_arn: _TaskArn) -> str | None:
+        """
+        Best-effort fetch of why a specific (likely already stopped) task stopped.
+        Only works within roughly the hour after the task stopped - ECS purges the
+        record after that, in which case this returns None like any other miss.
+        """
+        try:
+            response = self.ecs_client.describe_tasks(cluster=cluster_name, tasks=[task_arn])
+        except ClientError as e:
+            get_logger().debug(f"Error describing task {task_arn} for stop reason: {e}")
+            return None
+
+        tasks = response.get('tasks', [])
+        if not tasks or tasks[0].get('lastStatus') != 'STOPPED':
+            return None
+
+        task = tasks[0]
+        stop_code = task.get('stopCode')
+        stopped_reason = task.get('stoppedReason')
+        exit_code = (task.get('containers') or [{}])[0].get('exitCode')
+
+        return f"stopCode={stop_code} exitCode={exit_code} reason={stopped_reason}"
 
     def stop_task(self, cluster_name, task_arn):
         """Stop a running task in ECS. Kept for backwards compatibility."""

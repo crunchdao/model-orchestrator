@@ -64,6 +64,7 @@ class SQLiteModelRunRepository(ModelRunRepository, SQLiteRepository):
             self._add_column_if_not_exists(db, 'failure_exception', str)
             self._add_column_if_not_exists(db, 'failure_traceback', str)
             self._add_column_if_not_exists(db, 'failure_occurred_at', str)
+            self._add_column_if_not_exists(db, 'failure_infra_reason', str)
             self._add_column_if_not_exists(db, 'in_quarantine', bool)
             self._add_column_if_not_exists(db, 'augmented_info', str)
             self._add_column_if_not_exists(db, 'cruncher_wallet_pubkey', str)
@@ -135,6 +136,7 @@ class SQLiteModelRunRepository(ModelRunRepository, SQLiteRepository):
             'failure_exception': str(model.failure.exception) if model.failure else None,
             'failure_traceback': model.failure.traceback if model.failure else None,
             'failure_occurred_at': model.failure.occurred_at.isoformat() if model.failure else None,
+            'failure_infra_reason': model.failure.infra_reason if model.failure else None,
             'in_quarantine': 1 if model.in_quarantine else 0,
             'augmented_info': json.dumps(asdict(model.augmented_info)) if model.augmented_info else None,
             'cruncher_wallet_pubkey': model.cruncher_onchain_info.wallet_pubkey,
@@ -207,6 +209,7 @@ class SQLiteModelRunRepository(ModelRunRepository, SQLiteRepository):
                 exception=row["failure_exception"],
                 traceback=row["failure_traceback"],
                 occurred_at=datetime.datetime.fromisoformat(row["failure_occurred_at"]) if row["failure_occurred_at"] else None,
+                infra_reason=row["failure_infra_reason"],
             ) if row["failure_error_code"] else None,
             in_quarantine=row["in_quarantine"] == 1,
             augmented_info=ModelInfo(**json.loads(row["augmented_info"])) if row["augmented_info"] else None

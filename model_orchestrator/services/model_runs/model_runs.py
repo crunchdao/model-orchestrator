@@ -64,6 +64,8 @@ class ModelRunsService:
             state_subject,
             self.cluster,
             can_place_in_quarantine=app_config.can_place_in_quarantine,
+            connection_failure_grace_minutes=app_config.connection_failure_grace_minutes,
+            connection_failure_quiet_gap_minutes=app_config.connection_failure_quiet_gap_minutes,
         )
 
         self.lock = threading.Lock()

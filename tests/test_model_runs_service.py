@@ -26,7 +26,7 @@ class TestModelRunsService(unittest.TestCase):
             model_runs_repository=self.model_runs_repository_mock,
             crunch_repository=self.crunch_repository_mock,
             augmented_model_info_repository=self.augmented_model_run_repository_mock,
-            app_config=MagicMock(can_place_in_quarantine=True)
+            app_config=MagicMock(can_place_in_quarantine=True, connection_failure_grace_minutes=5, connection_failure_quiet_gap_minutes=2)
         )
 
         # Mock the lock for simplicity
