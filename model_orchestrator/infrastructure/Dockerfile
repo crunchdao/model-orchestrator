@@ -8,10 +8,8 @@ RUN apt update && apt install -y git && \
     echo "index-url = https://pypi.org/simple" >> /etc/pip.conf && \
     echo "extra-index-url =" >> /etc/pip.conf && \
     echo "    https://pypi.nvidia.com" >> /etc/pip.conf && \
-    echo "    https://pypi.ngc.nvidia.com" >> /etc/pip.conf && \
     echo "trusted-host =" >> /etc/pip.conf && \
-    echo "    pypi.nvidia.com" >> /etc/pip.conf && \
-    echo "    pypi.ngc.nvidia.com" >> /etc/pip.conf
+    echo "    pypi.nvidia.com" >> /etc/pip.conf
 
 ENV PYTHONUNBUFFERED=1
 ENV CATBOOST_TRAIN_DIR=/tmp/catboost_info
