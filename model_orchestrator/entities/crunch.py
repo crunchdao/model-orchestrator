@@ -11,12 +11,14 @@ class RunnerType(Enum):
     AWS_ECS = "AWS_ECS"
     LOCAL = "LOCAL"
     PHALA = "PHALA"
+    NOMAD = "NOMAD"
 
 
 @dataclass(kw_only=True)
 class HardwareConfig:
     vcpus: float
     memory: int
+    memory_reservation: int | None = None
     instances_types: list[str] | None = None
 
 
@@ -72,6 +74,7 @@ class Infrastructure:
     GpuConfig = GpuConfig
 
     is_secure: bool = False
+    network_mode: str = "bridge"
     runner_envs: dict[str, str] = field(default_factory=dict)
 
 

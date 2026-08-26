@@ -28,6 +28,7 @@ class AppConfig(_BaseConfig):
     tournament_api_url: str = Field(default="https://api.hub.crunchdao.com/", description="URL of the tournament API")
     use_augmented_info: bool = Field(True, description="Enable fetching of augmented information for models from the tournament API.")
     can_place_in_quarantine: bool = Field(True, description="Whether the orchestrator can place models in quarantine when multiple errors occur")
+    republish_states: bool = Field(False, description="On startup, republish all running model states to observers (RabbitMQ, WebSocket)")
 
     @staticmethod
     def from_yaml(yaml_content: str, *, exit_on_failure=True) -> 'AppConfig':

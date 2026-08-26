@@ -6,7 +6,7 @@ import boto3
 from botocore.exceptions import ClientError
 
 from model_orchestrator.configuration.properties._infrastructure import \
-    AwsRunnerInfrastructureConfig
+    AwsBuilderInfrastructureConfig
 
 from ...infrastructure import dockerfile
 from ...entities import Crunch, Infrastructure, ModelRun
@@ -28,7 +28,7 @@ class AwsCodeBuildModelBuilder(Builder):
         'STOPPED': ModelRun.BuilderStatus.FAILED,
     }
 
-    def __init__(self, aws_config: AwsRunnerInfrastructureConfig):
+    def __init__(self, aws_config: AwsBuilderInfrastructureConfig):
         super().__init__()
 
         self._aws_config = aws_config
