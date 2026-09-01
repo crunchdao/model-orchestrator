@@ -93,7 +93,7 @@ class PhalaModelRunner(Runner):
 
         logger.info("Start submitted: task_id=%s for model=%s", task_id, model.model_id)
 
-        logs_arn = None  # Logs live inside the TEE
+        logs_arn = f"/models/logs/runner/{task_id}"
         runner_info = {"spawntee_task_id": task_id}
         return task_id, logs_arn, runner_info
 

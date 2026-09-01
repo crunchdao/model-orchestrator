@@ -361,7 +361,7 @@ class SpawnteeClient:
 
         Returns the raw Response so the caller can stream or read the body.
         """
-        params = {"follow": str(follow).lower(), "tail": str(tail), "from_start": str(from_start).lower()}
+        params = {"follow": str(follow).lower(), "tail": str(tail), "from_start": str(from_start).lower(), "format": "json"}
         return self._request(
             "GET", f"/logs/builder/{task_id}",
             params=params,
@@ -382,7 +382,7 @@ class SpawnteeClient:
 
         Returns the raw Response so the caller can stream or read the body.
         """
-        params = {"follow": str(follow).lower(), "tail": str(tail), "from_start": str(from_start).lower()}
+        params = {"follow": str(follow).lower(), "tail": str(tail), "from_start": str(from_start).lower(), "format": "json"}
         return self._request(
             "GET", f"/logs/runner/{task_id}",
             params=params,
