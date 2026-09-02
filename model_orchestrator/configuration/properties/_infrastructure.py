@@ -1,3 +1,4 @@
+import os
 from typing import Annotated, Literal, Union
 
 from pydantic import Field, field_validator
@@ -22,6 +23,14 @@ class AwsBuilderInfrastructureConfig(_BaseConfig):
     s3_bucket_name: str = Field("crunchdao--competition--staging", description="S3 bucket name for model submissions and resources")
     codebuild_project_name: str = Field("model-builder", description="AWS CodeBuild project name for building models")
     ecr_repository_name: str = Field("crunchers-models-staging", description="AWS ECR name for saving models")
+    docker_username: str = Field(
+        default_factory=lambda: os.environ.get("DOCKER_USERNAME", ""),
+        description="Docker Hub username for authenticated base image pulls (defaults to DOCKER_USERNAME env var)",
+    )
+    docker_token: str = Field(
+        default_factory=lambda: os.environ.get("DOCKER_TOKEN", ""),
+        description="Docker Hub token for authenticated base image pulls (defaults to DOCKER_TOKEN env var)",
+    )
 
 
 class LocalBuilderInfrastructureConfig(_BaseConfig):

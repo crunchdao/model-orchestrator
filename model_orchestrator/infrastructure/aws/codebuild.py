@@ -10,7 +10,6 @@ from model_orchestrator.configuration.properties._infrastructure import \
 
 from ...infrastructure import dockerfile
 from ...entities import Crunch, Infrastructure, ModelRun
-from ...infrastructure.aws.session_manager import SecretManager
 from ...services import Builder
 from ...utils.compat import batched
 from ...utils.logging_utils import get_logger
@@ -39,6 +38,8 @@ class AwsCodeBuildModelBuilder(Builder):
             project_name=self._aws_config.codebuild_project_name,
             s3_bucket_name=self._aws_config.s3_bucket_name,
             ecr_repository_name=self._aws_config.ecr_repository_name,
+            docker_username=self._aws_config.docker_username,
+            docker_token=self._aws_config.docker_token,
         )
 
     def get_ecr_container_uri(self, region, ecr_repository_name):
@@ -107,17 +108,20 @@ class AwsCodeBuild:
         region: Optional[str],
         project_name: str,
         s3_bucket_name: str,
-        ecr_repository_name: str
+        ecr_repository_name: str,
+        docker_username: str,
+        docker_token: str,
     ):
         self.region = region
         self.project_name = project_name
         self.s3_bucket_name = s3_bucket_name
         self.ecr_repository_name = ecr_repository_name
+        self.docker_username = docker_username
+        self.docker_token = docker_token
 
         self.codebuild_client = boto3.client("codebuild", region_name=region)
         self.account_id = boto3.client("sts").get_caller_identity()["Account"]
-        self.docker_credentials = SecretManager(self.region).get_docker_credentials()
-        if not self.docker_credentials:
+        if not self.docker_username or not self.docker_token:
             raise Exception("Docker credentials not found")
 
     def create_project(self):
@@ -204,7 +208,6 @@ class AwsCodeBuild:
         if not bool(resources_id) or resources_id.strip() == "":
             resources_id = ""
 
-        docker_username, docker_token = self.docker_credentials
         response = self.codebuild_client.start_build(
             projectName=self.project_name,
             sourceVersion="",
@@ -214,8 +217,8 @@ class AwsCodeBuild:
                 {"name": "RESOURCES_ID", "value": str(resources_id).strip(), "type": "PLAINTEXT"},  # can't be empty, risk of downloading all models, test is in the buildspec.yml
                 {"name": "HARDWARE_TYPE", "value": hardware_type.value, "type": "PLAINTEXT"},
                 {"name": "IMAGE_TAG", "value": docker_tag, "type": "PLAINTEXT"},
-                {"name": "DOCKER_TOKEN", "value": docker_token, "type": "PLAINTEXT"},
-                {"name": "DOCKER_USERNAME", "value": docker_username, "type": "PLAINTEXT"},
+                {"name": "DOCKER_TOKEN", "value": self.docker_token, "type": "PLAINTEXT"},
+                {"name": "DOCKER_USERNAME", "value": self.docker_username, "type": "PLAINTEXT"},
                 {"name": "DOCKERFILE_CONTENT", "value": dockerfile, "type": "PLAINTEXT"},
                 {"name": "S3_BUCKET_NAME", "value": self.s3_bucket_name, "type": "PLAINTEXT"},
                 {"name": "IMAGE_REPO_NAME", "value": self.ecr_repository_name, "type": "PLAINTEXT"},
