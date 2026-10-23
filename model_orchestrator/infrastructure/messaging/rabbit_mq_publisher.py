@@ -120,6 +120,13 @@ class RabbitMQPublisher(ModelsStateObserver):
                 await asyncio.sleep(1)
 
     @staticmethod
+    def _detect_log_type(model_run: ModelRun) -> str:
+        arn = model_run.builder_logs_arn or model_run.runner_logs_arn
+        if arn and arn.startswith("/models/logs/"):
+            return "HTTP"
+        return "CLOUDWATCH"
+
+    @staticmethod
     def construct_message(model_run: ModelRun, status: str, statusMessage: str = "") -> Dict:
         """
         Constructs a message compatible with `ModelRunUpdateMessage`.
@@ -134,6 +141,7 @@ class RabbitMQPublisher(ModelsStateObserver):
             "hardwareType": model_run.hardware_type.value,
             "builderLogUri": model_run.builder_logs_arn,
             "runnerLogUri": model_run.runner_logs_arn,
+            "logType": RabbitMQPublisher._detect_log_type(model_run),
         }
 
     def on_runner_state_changed(self, model_run: ModelRun, previous_state: ModelRun.RunnerStatus, new_state: ModelRun.RunnerStatus):
