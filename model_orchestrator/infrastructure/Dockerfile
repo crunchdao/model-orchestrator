@@ -2,7 +2,7 @@
 ARG BASE_IMAGE=python:3.13
 
 FROM $BASE_IMAGE
-RUN apt update && apt install -y git && \
+RUN apt update && apt install -y git ca-certificates && \
     echo "[global]" >> /etc/pip.conf && \
     echo "no-cache-dir = true" >> /etc/pip.conf && \
     echo "index-url = https://pypi.org/simple" >> /etc/pip.conf && \
