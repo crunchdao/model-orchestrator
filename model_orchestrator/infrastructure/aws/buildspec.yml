@@ -28,7 +28,7 @@ phases:
           docker build --build-arg BASE_IMAGE=tensorflow/tensorflow:2.14.0-gpu --build-arg HAS_GPU=True -t $IMAGE_REPO_NAME:$IMAGE_TAG -f Dockerfile .
         else
           echo "Building docker image with CPU"
-          docker build --build-arg BASE_IMAGE=python:3.13 -t $IMAGE_REPO_NAME:$IMAGE_TAG -f Dockerfile .
+          docker build --build-arg BASE_IMAGE=public.ecr.aws/docker/library/python:3.13 -t $IMAGE_REPO_NAME:$IMAGE_TAG -f Dockerfile .
         fi
 
   post_build:
